@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
 
 export async function POST(req: Request) {
-	const cookieStore = cookies();
+	const cookieStore = await cookies();
 	const accessToken = cookieStore.get('access_token')?.value;
 	const deviceId = cookieStore.get('device_id')?.value;
 
