@@ -112,13 +112,13 @@ export function LoginForm() {
 				)}
 			</div>
 
-			<div className="flex items-center justify-between">
+			{/* <div className="flex items-center justify-between">
 				<label className="flex items-center gap-2 text-sm">
 					<input type="checkbox" className="h-4 w-4" {...form.register('remember')} disabled={loading} />
 					Ingat perangkat ini
-				</label>
+				</label> */}
 				{/* <a href="/forgot-password" className="text-sm text-primary hover:underline">Lupa kata sandi?</a> */}
-			</div>
+			{/* </div> */}
 
 			<Button type="submit" className="w-full" disabled={loading}>
 				{loading ? 'Memproses...' : 'Masuk'}
