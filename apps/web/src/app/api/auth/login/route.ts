@@ -5,12 +5,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://kopsiku.com:300
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const { phone, password, remember } = body ?? {};
+//   const { phone, password, remember } = body ?? {};
+  const { phone, password } = body ?? {};
 
   // device_id cookie untuk refresh token per device
   const cookieStore = await cookies(); // <<< tambahkan await di sini
   let deviceId = cookieStore.get?.('device_id')?.value;
-  if (remember && !deviceId) {
+//   if (remember && !deviceId) {
+  if (!deviceId) {
     deviceId = crypto.randomUUID();
   }
 
@@ -53,7 +55,8 @@ export async function POST(req: Request) {
 		path: '/',
 		maxAge: refreshTtl,
 	});
-	if (remember && deviceId) {
+	// if (remember && deviceId) {
+	if (deviceId) {
 		response.cookies.set('device_id', deviceId, {
 			httpOnly: true,
 			secure: isProd,
