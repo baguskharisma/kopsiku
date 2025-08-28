@@ -1,0 +1,70 @@
+import { 
+    Controller, 
+    Post, 
+    Body, 
+    UseGuards, 
+    Request, 
+    HttpCode, 
+    HttpStatus,
+    ValidationPipe,
+    UsePipes,
+  } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { LoginDto } from 'src/auth/dto/login.dto';
+import { Public } from 'src/decorators/public.decorator';
+import { RegisterDto } from 'src/auth/dto/register.dto';
+import { RefreshTokenDto } from 'src/auth/dto/refresh-token.dto';
+import { JwtAuthGuard } from 'src/guards/jwt-auth.guard';
+ 
+  
+  @Controller('auth')
+  @UsePipes(new ValidationPipe({ transform: true }))
+  export class AuthController {
+    constructor(private authService: AuthService) {}
+  
+    @Public()
+    @Post('login')
+    @HttpCode(HttpStatus.OK)
+    async login(@Body() loginDto: LoginDto) {
+      return this.authService.login(loginDto);
+    }
+  
+    @Public()
+    @Post('register')
+    @HttpCode(HttpStatus.CREATED)
+    async register(@Body() registerDto: RegisterDto) {
+      return this.authService.register(registerDto);
+    }
+  
+    @Public()
+    @Post('refresh')
+    @HttpCode(HttpStatus.OK)
+    async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
+      return this.authService.refreshToken(refreshTokenDto);
+    }
+  
+    @UseGuards(JwtAuthGuard)
+    @Post('logout')
+    @HttpCode(HttpStatus.OK)
+    async logout(@Request() req, @Body() body: { deviceId?: string }) {
+      return this.authService.logout(req.user.id, body.deviceId);
+    }
+  
+    @UseGuards(JwtAuthGuard)
+    @Post('verify-token')
+    @HttpCode(HttpStatus.OK)
+    async verifyToken(@Request() req) {
+      return {
+        valid: true,
+        user: {
+          id: req.user.id,
+          name: req.user.name,
+          phone: req.user.phone,
+          email: req.user.email,
+          role: req.user.role,
+          avatarUrl: req.user.avatarUrl,
+          isVerified: req.user.isVerified,
+        },
+      };
+    }
+  }
