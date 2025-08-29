@@ -87,11 +87,11 @@ export default function TaxiAppMainPage() {
     <QueryClientProvider client={queryClient}>
       <div className="h-screen flex flex-col bg-gray-50 relative overflow-hidden max-w-md mx-auto" data-testid="taxi-app-main">
         {/* Header */}
-        <header className="bg-white shadow-sm p-4 z-20 flex-shrink-0">
+        {/* <header className="bg-white shadow-sm p-4 z-20 flex-shrink-0">
           <div className="max-w-3xl mx-auto">
             <h1 className="text-2xl font-bold text-gray-900">Kopsi'Ku</h1>
           </div>
-        </header>
+        </header> */}
   
         {/* Content area: map fills remainder */}
         <div className="flex-1 relative min-h-0">

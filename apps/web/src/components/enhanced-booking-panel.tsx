@@ -12,6 +12,24 @@ import type { Location } from "@/lib/types";
 import type { VehicleType } from "@prisma/client";
 import { ScrollArea } from "./ui/scroll-area";
 
+interface DriverOption {
+  id: string;
+  name: string;
+  plate: string;
+  phone: string;
+  vehicleType?: VehicleType;
+}
+
+const DEFAULT_DRIVERS: DriverOption[] = [
+  { id: 'BM-1856-QU', name: 'Endrizal', plate: 'BM 1856 QU', phone: '08126850120' },
+  { id: 'BM-1858-QU', name: 'Syamsuddin', plate: 'BM 1858 QU', phone: '081270432500' },
+  { id: 'BM-1860-QU', name: 'Safrizal', plate: 'BM 1860 QU', phone: '085274658457' },
+  { id: 'BM-1862-QU', name: 'Mardianto', plate: 'BM 1862 QU', phone: '088279086838' },
+  { id: 'BM-1863-QU', name: 'Syafrizal', plate: 'BM 1863 QU', phone: '081378334227' },
+  { id: 'BM-1865-QU', name: 'Hotler Sibagariang', plate: 'BM 1865 QU', phone: '081371573112' },
+  { id: 'BM-1394-JU', name: 'Zalmi', plate: 'BM 1394 JU', phone: '085351138940' },
+];
+
 interface EnhancedBookingPanelProps {
   currentLocation: Coordinates | null;
   selectedDestination?: Location | null;
@@ -20,6 +38,7 @@ interface EnhancedBookingPanelProps {
   onBookRide: (rideData: any) => void;
   onRouteCalculated?: (route: RouteResult) => void;
   selectedPickup?: Location | null;
+  availableDrivers?: DriverOption[]; // NEW: list of available drivers
 }
 
 interface FareEstimate {
@@ -38,7 +57,8 @@ export default function EnhancedBookingPanel({
   onPickupClick,
   onBookRide,
   onRouteCalculated,
-  selectedPickup
+  selectedPickup,
+  availableDrivers = DEFAULT_DRIVERS,
 }: EnhancedBookingPanelProps) {
   const [selectedVehicleType, setSelectedVehicleType] = useState<VehicleType>("ECONOMY");
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
@@ -49,6 +69,9 @@ export default function EnhancedBookingPanel({
   // NEW: passenger inputs
   const [passengerName, setPassengerName] = useState<string>("");
   const [passengerPhone, setPassengerPhone] = useState<string>("");
+
+  // NEW: driver selection
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
   // Calculate route and fare when pickup or destination changes
   useEffect(() => {
@@ -189,6 +212,8 @@ export default function EnhancedBookingPanel({
         }
       }
 
+      const driver = availableDrivers.find(d => d.id === selectedDriverId) || null;
+
       const rideData = {
         pickupAddress: selectedPickup?.address || "Lokasi Saat Ini",
         pickupLat: pickupLocation.lat,
@@ -204,9 +229,13 @@ export default function EnhancedBookingPanel({
         airportFare: Math.round((fareEstimate.airportFare || 0) * 100),
         totalFare: Math.round(finalFare * 100),
         paymentMethod: "CASH" as const,
-        passengerName: "Guest User", // In real app, get from auth
-        passengerPhone: "08123456789", // In real app, get from auth
+        passengerName: passengerName || "Guest User",
+        passengerPhone: passengerPhone || "",
         routeData: routeData, // Pass route data to the booking
+        // NEW: include driver info if selected
+        selectedDriverId: driver ? driver.id : null,
+        selectedDriverName: driver ? driver.name : null,
+        selectedDriverPlate: driver ? driver.plate : null,
       };
 
       const response = await fetch("/api/orders", {
@@ -408,6 +437,30 @@ export default function EnhancedBookingPanel({
               className="w-full p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               type="tel"
             />
+          </div>
+
+          {/* NEW: Driver dropdown */}
+          <div>
+            <label htmlFor="driver-select" className="text-sm font-medium text-gray-700 block mb-1">
+              Driver yang tersedia
+            </label>
+            <select
+              id="driver-select"
+              data-testid="select-driver"
+              value={selectedDriverId || ""}
+              onChange={(e) => setSelectedDriverId(e.target.value || null)}
+              className="w-full p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Pilih Driver</option>
+              {availableDrivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} — {d.plate}
+                </option>
+              ))}
+            </select>
+            {availableDrivers.length === 0 && (
+              <p className="text-xs text-gray-500 mt-1">Tidak ada Driver tersedia saat ini.</p>
+            )}
           </div>
         </div>
 
