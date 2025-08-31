@@ -70,18 +70,28 @@ export function Footer() {
               <div className="flex items-start space-x-3">
                 <MapPin className="h-4 w-4 mt-0.5 text-gray-400" />
                 <span className="text-gray-300">
-                  Jl. Jenderal Sudirman No. 123
-                  <br />
-                  Pekanbaru, Riau 28116
+                  Jl. Teuku Cik Ditiro No. 103, Kelurahan Tanah Datar, Kecamatan Pekanbaru Kota, <br /> Kota Pekanbaru - Riau 28156
                 </span>
               </div>
               <div className="flex items-center space-x-3">
                 <Phone className="h-4 w-4 text-gray-400" />
-                <span className="text-gray-300">+62 761 123 4567</span>
+                <span className="text-gray-300">081372175558</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Phone className="h-4 w-4 text-gray-400" />
+                <span className="text-gray-300">081371583338</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Instagram className="h-4 w-4 text-gray-400" />
+                <span className="text-gray-300">kopsi24</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Facebook className="h-4 w-4 text-gray-400" />
+                <span className="text-gray-300">Koperasi_pengemudi_taksi_Pekanbaru</span>
               </div>
               <div className="flex items-center space-x-3">
                 <Mail className="h-4 w-4 text-gray-400" />
-                <span className="text-gray-300">info@kopsipekanbaru.com</span>
+                <span className="text-gray-300">kopsi.pku@gmail.com</span>
               </div>
               <div className="flex items-start space-x-3">
                 <Clock className="h-4 w-4 mt-0.5 text-gray-400" />
