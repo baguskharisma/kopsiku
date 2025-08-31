@@ -11,10 +11,10 @@ export function middleware(req: NextRequest) {
 	const isProtected = !isAuthPage; // semua selain login dianggap protected; sesuaikan jika perlu
 
 	// Jika sudah login, jangan biarkan ke halaman login
-	// if (token && isAuthPage) {
-	// 	const target = new URL('/', req.url);
-	// 	return NextResponse.redirect(target);
-	// }
+	if (token && isAuthPage) {
+		const target = new URL('/', req.url);
+		return NextResponse.redirect(target);
+	}
 
 	// Jika belum login, jangan biarkan ke halaman protected
 	if (!token && isProtected) {
@@ -30,7 +30,7 @@ export function middleware(req: NextRequest) {
 export const config = {
 	// Sesuaikan daftar route yang ingin diawasi
 	matcher: [
-		// '/',
+		'/',
 		'/dashboard/:path*',
 		'/login',
 	],
