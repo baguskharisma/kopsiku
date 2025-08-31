@@ -47,13 +47,13 @@ export function HeaderTaxi({ isAuthenticated = false, userName }: HeaderProps) {
           {/* Logo */}
           <Link href="/" className="flex items-center space-x-2">
             <div className="w-10 h-10 flex items-center justify-center">
-              <Image
-                src="/images/logo-kopsi-pekanbaru.jpeg"
-                width={40}
-                height={40}
-                alt="Logo Kopsi Pekanbaru"
-                className="rounded-lg object-contain"
-              />
+            <Image
+              src="/logo-kopsiku.png"
+              alt="Logo Kopsiku"
+              width={40}
+              height={40}
+              className="rounded-full"
+            />
             </div>
             <span className="text-xl font-bold text-gray-900">Taxi KOPSI Pekanbaru</span>
           </Link>
@@ -121,7 +121,7 @@ export function HeaderTaxi({ isAuthenticated = false, userName }: HeaderProps) {
                       <SheetTitle className="flex items-center space-x-2">
                         <div className="w-8 h-8 flex items-center justify-center">
                           <Image
-                            src="/images/logo-kopsi-pekanbaru.jpeg"
+                            src="/logo-kopsiku.png"
                             width={32}
                             height={32}
                             alt="Logo Kopsi Pekanbaru"

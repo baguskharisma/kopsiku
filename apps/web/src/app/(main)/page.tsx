@@ -153,10 +153,18 @@ export default function HomePage() {
       {/* Hero Section with Dynamic Carousel */}
       <HeroCarousel images={carouselImages} autoPlayInterval={7000}>
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 text-white drop-shadow-2xl">
+          <h1 className="text-4xl font-bold text-white drop-shadow-2xl text-shadow-lg">
             Pesan Taxi dan Tiket Perjalanan Online
-            <span className="block text-yellow-400 drop-shadow-lg">Koperasi Pengemudi Taxi Pekanbaru</span>
           </h1>
+          <div>
+            <Image
+                src='/logo-kopsiku.png'
+                alt="Logo Kopsiku"
+                width={300}
+                height={300}
+                className='mx-auto'
+            />
+          </div>
           <p className="text-xl md:text-2xl lg:text-3xl mb-8 text-white/95 drop-shadow-lg max-w-3xl mx-auto leading-relaxed">
             Nikmati perjalanan nyaman ke seluruh destinasi di Riau dengan layanan travel dan taksi terpercaya
           </p>

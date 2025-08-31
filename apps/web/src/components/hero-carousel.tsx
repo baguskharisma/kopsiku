@@ -86,7 +86,8 @@ export function HeroCarousel({ images, autoPlayInterval = 5000, children }: Hero
               sizes="100vw"
             />
             {/* Gradient Overlay for better text readability */}
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-900/85 via-blue-800/75 to-blue-700/70"></div>
+            {/* <div className="absolute inset-0 bg-gradient-to-r from-blue-900/85 via-blue-800/75 to-blue-700/70"></div> */}
+            <div className="absolute inset-0 bg-black/20"></div>
             {/* Additional dark overlay for mobile */}
             <div className="absolute inset-0 bg-black/20 md:bg-black/10"></div>
           </div>

@@ -7,7 +7,7 @@ export function MobileNav() {
     <div className="flex flex-col space-y-3 mt-3 ms-3">
       <Link href="/" className="flex items-center space-x-2 mb-4">
         <Image
-          src="/images/logo-kopsi-pekanbaru.jpeg"
+          src="/logo-kopsiku.png"
           alt="KOPSI Pekanbaru"
           width={32}
           height={32}

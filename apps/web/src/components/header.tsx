@@ -17,8 +17,8 @@ export function Header() {
         <div className="mr-4 hidden md:flex">
           <Link href="/" className="mr-6 flex items-center space-x-2">
             <Image
-              src="/images/logo-kopsi-pekanbaru.jpeg"
-              alt="KOPSI Pekanbaru"
+              src="/logo-kopsiku.png"
+              alt="Logo Kopsiku"
               width={40}
               height={40}
               className="rounded-full"
@@ -55,13 +55,13 @@ export function Header() {
           <div className="w-full flex-1 md:w-auto md:flex-none">
             <Link href="/" className="flex items-center space-x-2 md:hidden">
               <Image
-                src="/images/logo-kopsi-pekanbaru.jpeg"
+                src="/logo-kopsiku.png"
                 alt="KOPSI Pekanbaru"
-                width={32}
-                height={32}
-                className="rounded-full"
+                width={100}
+                height={100}
+                // className="rounded-full"
               />
-              <span className="font-bold">KOPSI Pekanbaru</span>
+              <span className="font-bold">Pekanbaru</span>
             </Link>
           </div>
           <nav className="flex items-center space-x-2">
