@@ -18,6 +18,7 @@ export interface Location {
 
 // Order types based on Prisma schema
 export interface CreateOrderRequest {
+  routeData: any;
   // Passenger details
   passengerName: string;
   passengerPhone: string;

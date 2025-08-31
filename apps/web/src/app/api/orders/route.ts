@@ -1,22 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import { VehicleType, PaymentMethod, OrderStatus } from '@prisma/client';
 import type { CreateOrderRequest } from '@/lib/types';
+
+interface NestJSOrderRequest {
+  passengerName: string;
+  passengerPhone: string;
+  pickupAddress: string;
+  pickupCoordinates: {
+    lat: number;
+    lng: number;
+  };
+  dropoffAddress: string;
+  dropoffCoordinates: {
+    lat: number;
+    lng: number;
+  };
+  requestedVehicleType: VehicleType;
+  distanceMeters: number;
+  estimatedDurationMinutes: number;
+  baseFare: number; // in cents
+  distanceFare: number; // in cents
+  airportFare?: number; // in cents
+  totalFare: number; // in cents
+  paymentMethod: PaymentMethod;
+  routeData?: {
+    coordinates: { lat: number; lng: number }[];
+    distance: number;
+    duration: number;
+  };
+  specialRequests?: string;
+  tripType?: 'INSTANT' | 'SCHEDULED';
+  scheduledAt?: string;
+}
 
 export async function POST(request: NextRequest) {
   try {
     const orderData: CreateOrderRequest = await request.json();
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+
+    // Transform Next.js format to NestJS format
+    const nestJSOrderData: NestJSOrderRequest = {
+      passengerName: orderData.passengerName,
+      passengerPhone: orderData.passengerPhone,
+      pickupAddress: orderData.pickupAddress,
+      pickupCoordinates: {
+        lat: orderData.pickupLat,
+        lng: orderData.pickupLng,
+      },
+      dropoffAddress: orderData.dropoffAddress,
+      dropoffCoordinates: {
+        lat: orderData.dropoffLat,
+        lng: orderData.dropoffLng,
+      },
+      requestedVehicleType: orderData.requestedVehicleType,
+      distanceMeters: orderData.distanceMeters ?? 0,
+      estimatedDurationMinutes: orderData.estimatedDurationMinutes ?? 0,
+      baseFare: orderData.baseFare ?? 0,
+      distanceFare: orderData.distanceFare ?? 0,
+      airportFare: orderData.airportFare ?? 0,
+      totalFare: orderData.totalFare,
+      paymentMethod: orderData.paymentMethod,
+      specialRequests: orderData.specialRequests,
+      tripType: 'INSTANT',
+      routeData: orderData.routeData ? {
+        coordinates: orderData.routeData.coordinates || [],
+        distance: orderData.routeData.distance || 0,
+        duration: orderData.routeData.duration || 0,
+      } : undefined,
+    };
 
     // Validate required fields
     const requiredFields = [
       'passengerName',
       'passengerPhone', 
       'pickupAddress',
-      'pickupLat',
-      'pickupLng',
-      'dropoffAddress', 
-      'dropoffLat',
-      'dropoffLng',
+      'dropoffAddress',
       'requestedVehicleType',
       'baseFare',
       'totalFare',
@@ -24,7 +82,9 @@ export async function POST(request: NextRequest) {
     ];
 
     for (const field of requiredFields) {
-      if (!(field in orderData) || orderData[field as keyof CreateOrderRequest] === null || orderData[field as keyof CreateOrderRequest] === undefined) {
+      if (!(field in nestJSOrderData) || 
+          nestJSOrderData[field as keyof NestJSOrderRequest] === null || 
+          nestJSOrderData[field as keyof NestJSOrderRequest] === undefined) {
         return NextResponse.json(
           { error: `Missing required field: ${field}` },
           { status: 400 }
@@ -33,195 +93,92 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate enums
-    if (!Object.values(VehicleType).includes(orderData.requestedVehicleType)) {
+    if (!Object.values(VehicleType).includes(nestJSOrderData.requestedVehicleType)) {
       return NextResponse.json(
         { error: 'Invalid vehicle type' },
         { status: 400 }
       );
     }
 
-    if (!Object.values(PaymentMethod).includes(orderData.paymentMethod)) {
+    if (!Object.values(PaymentMethod).includes(nestJSOrderData.paymentMethod)) {
       return NextResponse.json(
         { error: 'Invalid payment method' },
         { status: 400 }
       );
     }
 
-    // Find available fleet for the requested vehicle type
-    const availableFleet = await prisma.fleet.findFirst({
-      where: {
-        vehicleType: orderData.requestedVehicleType,
-        status: 'ACTIVE',
-        assignments: {
-          some: {
-            isActive: true,
-            driver: {
-              driverProfile: {
-                driverStatus: 'ACTIVE',
-                isVerified: true
-              }
-            }
-          }
-        }
+    // Forward request to NestJS backend
+    const response = await fetch(`${backendUrl}/api/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Add authentication if needed
+        // 'Authorization': `Bearer ${token}`
       },
-      include: {
-        assignments: {
-          where: {
-            isActive: true
-          },
-          include: {
-            driver: {
-              include: {
-                driverProfile: true
-              }
-            }
-          }
-        }
-      }
+      body: JSON.stringify(nestJSOrderData),
     });
 
-    if (!availableFleet || !availableFleet.assignments[0]) {
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('NestJS backend error:', errorData);
+      
       return NextResponse.json(
-        { error: 'No available drivers for the requested vehicle type' },
-        { status: 404 }
+        { 
+          success: false,
+          error: errorData.message || 'Failed to create order',
+          details: errorData
+        },
+        { status: response.status }
       );
     }
 
-    const driver = availableFleet.assignments[0].driver;
+    const result = await response.json();
 
-    // Generate unique order number
-    const orderNumber = `TXG-${Date.now()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
-
-    // Create order in database
-    const order = await prisma.order.create({
+    // Transform NestJS response back to Next.js format if needed
+    const transformedResponse = {
+      success: true,
       data: {
-        orderNumber,
-        fleetId: availableFleet.id,
-        driverId: driver.id,
-        // customerId can be null for guest users
-        
-        // Passenger details
-        passengerName: orderData.passengerName,
-        passengerPhone: orderData.passengerPhone,
-        specialRequests: orderData.specialRequests,
-        
-        // Route information
-        pickupAddress: orderData.pickupAddress,
-        pickupLat: orderData.pickupLat,
-        pickupLng: orderData.pickupLng,
-        dropoffAddress: orderData.dropoffAddress,
-        dropoffLat: orderData.dropoffLat,
-        dropoffLng: orderData.dropoffLng,
-        
-        // Trip details
-        requestedVehicleType: orderData.requestedVehicleType,
-        distanceMeters: orderData.distanceMeters,
-        estimatedDurationMinutes: orderData.estimatedDurationMinutes,
-
-        // Fare calculation (convert from Rupiah to cents)
-        baseFare: BigInt(orderData.baseFare),
-        distanceFare: BigInt(orderData.distanceFare || 0),
-        timeFare: BigInt(orderData.timeFare || 0),
-        airportFare: BigInt(orderData.airportFare || 0),
-        surgeFare: BigInt(orderData.surgeFare || 0),
-        additionalFare: BigInt(orderData.additionalFare || 0),
-        discount: BigInt(orderData.discount || 0),
-        totalFare: BigInt(orderData.totalFare),
-        
-        // Payment
-        paymentMethod: orderData.paymentMethod,
-        paymentStatus: 'PENDING',
-
-        // Initial status
-        status: 'PENDING',
+        id: result.data?.id,
+        orderNumber: result.data?.orderNumber,
+        status: result.data?.status,
+        pickupAddress: result.data?.pickupAddress,
+        dropoffAddress: result.data?.dropoffAddress,
+        totalFare: result.data?.totalFare,
+        vehicleType: result.data?.vehicleType,
+        driver: result.data?.driver ? {
+          id: result.data.driver.id,
+          name: result.data.driver.name,
+          phone: result.data.driver.phone,
+          rating: result.data.driver.rating || 0,
+          vehicleInfo: result.data.driver.vehicleInfo
+        } : null,
+        estimatedArrival: result.data?.estimatedArrival || '3-5 minutes',
+        createdAt: result.data?.createdAt
       },
-      include: {
-        fleet: true,
-        driver: {
-          include: {
-            driverProfile: true
-          }
-        }
-      }
-    });
-
-    // Create initial status history
-    await prisma.orderStatusHistory.create({
-      data: {
-        orderId: order.id,
-        fromStatus: 'PENDING',
-        toStatus: 'PENDING',
-        reason: 'Order created',
-        metadata: {
-          createdBy: 'system',
-          timestamp: new Date().toISOString()
-        }
-      }
-    });
-
-    // Update driver status to busy
-    await prisma.driverProfile.update({
-      where: {
-        userId: driver.id
-      },
-      data: {
-        driverStatus: 'BUSY',
-        statusChangedAt: new Date()
-      }
-    });
-
-    // Create driver status history
-    await prisma.driverStatusHistory.create({
-      data: {
-        driverId: driver.driverProfile!.id,
-        fromStatus: 'ACTIVE',
-        toStatus: 'BUSY',
-        reason: 'Assigned to order',
-        metadata: {
-          orderId: order.id,
-          orderNumber: order.orderNumber
-        }
-      }
-    });
-
-    // Return order with driver info
-    const response = {
-      id: order.id,
-      orderNumber: order.orderNumber,
-      status: order.status,
-      pickupAddress: order.pickupAddress,
-      dropoffAddress: order.dropoffAddress,
-      totalFare: Number(order.totalFare), // Convert BigInt back to number for JSON
-      vehicleType: order.requestedVehicleType,
-      driver: {
-        id: driver.id,
-        name: driver.name,
-        phone: driver.phone,
-        rating: driver.driverProfile?.rating || 0,
-        vehicleInfo: {
-          brand: order.fleet.brand,
-          model: order.fleet.model,
-          plateNumber: order.fleet.plateNumber,
-          color: order.fleet.color
-        }
-      },
-      estimatedArrival: '3-5 minutes', // This would be calculated based on driver location
-      createdAt: order.createdAt
+      message: result.message || 'Order created successfully'
     };
 
-    return NextResponse.json({
-      success: true,
-      data: response,
-      message: 'Order created successfully'
-    });
+    return NextResponse.json(transformedResponse);
 
   } catch (error) {
-    console.error('Order creation error:', error);
+    console.error('Next.js API route error:', error);
+    
+    // Handle network errors (NestJS backend unreachable)
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Backend service unavailable',
+          message: 'Unable to connect to booking service. Please try again later.'
+        },
+        { status: 503 }
+      );
+    }
     
     return NextResponse.json(
       { 
         success: false,
-        error: 'Failed to create order',
+        error: 'Internal server error',
         message: error instanceof Error ? error.message : 'Unknown error occurred'
       },
       { status: 500 }
@@ -232,100 +189,45 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status');
-    const driverId = searchParams.get('driverId');
-    const customerId = searchParams.get('customerId');
-    const limit = parseInt(searchParams.get('limit') || '10');
-    const offset = parseInt(searchParams.get('offset') || '0');
-
-    const whereConditions: any = {};
-
-    if (status && Object.values(OrderStatus).includes(status as OrderStatus)) {
-      whereConditions.status = status as OrderStatus;
-    }
-
-    if (driverId) {
-      whereConditions.driverId = driverId;
-    }
-
-    if (customerId) {
-      whereConditions.customerId = customerId;
-    }
-
-    const orders = await prisma.order.findMany({
-      where: whereConditions,
-      include: {
-        fleet: {
-          select: {
-            brand: true,
-            model: true,
-            plateNumber: true,
-            color: true,
-            vehicleType: true
-          }
-        },
-        driver: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            driverProfile: {
-              select: {
-                rating: true,
-                currentLat: true,
-                currentLng: true
-              }
-            }
-          }
-        },
-        customer: {
-          select: {
-            id: true,
-            name: true,
-            phone: true
-          }
-        }
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+    
+    // Forward query parameters to NestJS backend
+    const queryString = searchParams.toString();
+    const response = await fetch(`${backendUrl}/api/orders${queryString ? `?${queryString}` : ''}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        // Add authentication if needed
+        // 'Authorization': `Bearer ${token}`
       },
-      orderBy: {
-        createdAt: 'desc'
-      },
-      take: limit,
-      skip: offset
     });
 
-    // Convert BigInt fields to numbers for JSON serialization
-    const serializedOrders = orders.map(order => ({
-      ...order,
-      baseFare: Number(order.baseFare),
-      distanceFare: Number(order.distanceFare),
-      timeFare: Number(order.timeFare),
-      airportFare: Number(order.airportFare),
-      surgeFare: Number(order.surgeFare),
-      additionalFare: Number(order.additionalFare),
-      discount: Number(order.discount),
-      totalFare: Number(order.totalFare),
-      cancellationFee: Number(order.cancellationFee)
-    }));
+    if (!response.ok) {
+      const errorData = await response.json();
+      return NextResponse.json(
+        { 
+          success: false,
+          error: errorData.message || 'Failed to fetch orders' 
+        },
+        { status: response.status }
+      );
+    }
 
-    const total = await prisma.order.count({
-      where: whereConditions
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        orders: serializedOrders,
-        pagination: {
-          total,
-          limit,
-          offset,
-          hasMore: offset + limit < total
-        }
-      }
-    });
+    const result = await response.json();
+    return NextResponse.json(result);
 
   } catch (error) {
     console.error('Get orders error:', error);
+    
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Backend service unavailable' 
+        },
+        { status: 503 }
+      );
+    }
     
     return NextResponse.json(
       { 

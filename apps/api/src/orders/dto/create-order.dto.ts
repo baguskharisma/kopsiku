@@ -1,64 +1,64 @@
-import {
-    IsString,
-    IsNotEmpty,
-    IsNumber,
-    IsEnum,
-    IsOptional,
-    IsPhoneNumber,
-    Min,
+import { 
+    IsString, 
+    IsNotEmpty, 
+    IsNumber, 
+    IsEnum, 
+    IsOptional, 
+    IsPhoneNumber, 
+    Min, 
     Max,
     IsObject,
     ValidateNested,
     IsArray,
     ArrayMinSize
-} from 'class-validator';
-import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
-import { VehicleType, PaymentMethod, TripType } from '@prisma/client';
-
-class CoordinateDto {
+  } from 'class-validator';
+  import { Type } from 'class-transformer';
+  import { ApiProperty } from '@nestjs/swagger';
+  import { VehicleType, PaymentMethod, TripType } from '@prisma/client';
+  
+  class CoordinateDto {
     @ApiProperty({ example: -6.2088, description: 'Latitude coordinate' })
     @IsNumber({}, { message: 'Latitude must be a valid number' })
     @Min(-90, { message: 'Latitude must be between -90 and 90' })
     @Max(90, { message: 'Latitude must be between -90 and 90' })
     lat: number;
-
+  
     @ApiProperty({ example: 106.8456, description: 'Longitude coordinate' })
     @IsNumber({}, { message: 'Longitude must be a valid number' })
     @Min(-180, { message: 'Longitude must be between -180 and 180' })
     @Max(180, { message: 'Longitude must be between -180 and 180' })
     lng: number;
-} 
-
-class RouteDataDto {
+  }
+  
+  class RouteDataDto {
     @ApiProperty({ description: 'Route coordinates array' })
     @IsArray()
     @ArrayMinSize(2, { message: 'Route must have at least 2 coordinates' })
     @ValidateNested({ each: true })
     @Type(() => CoordinateDto)
     coordinates: CoordinateDto[];
-
+  
     @ApiProperty({ example: 25.5, description: 'Route distance in kilometers' })
     @IsNumber({}, { message: 'Distance must be a valid number' })
     @Min(0.1, { message: 'Distance must be at least 0.1 km' })
     distance: number;
-
+  
     @ApiProperty({ example: 45, description: 'Estimated duration in minutes' })
     @IsNumber({}, { message: 'Duration must be a valid number' })
     @Min(1, { message: 'Duration must be at least 1 minute' })
     duration: number;
-}
-
-export class CreateOrderDto {
+  }
+  
+  export class CreateOrderDto {
     @ApiProperty({ example: 'Budi Santoso', description: 'Passenger full name' })
     @IsString({ message: 'Passenger name must be a string' })
     @IsNotEmpty({ message: 'Passenger name is required' })
     passengerName: string;
-
+  
     @ApiProperty({ example: '+628123456789', description: 'Passenger phone number' })
     @IsPhoneNumber('ID', { message: 'Please provide a valid Indonesian phone number' })
     passengerPhone: string;
-
+  
     @ApiProperty({ example: 'Bandara Internasional - Terminal 2', description: 'Pickup address' })
     @IsString({ message: 'Pickup address must be a string' })
     @IsNotEmpty({ message: 'Pickup address is required' })

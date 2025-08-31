@@ -153,6 +153,8 @@ export default function TaxiAppMainPage() {
               onPickupClick={() => setShowPickupPicker(true)}
               onBookRide={handleBookRide}
               onRouteCalculated={handleRouteCalculated}
+              // operatorId=""
+              // operatorRole="ADMIN"
             />
           </div>
         </div>

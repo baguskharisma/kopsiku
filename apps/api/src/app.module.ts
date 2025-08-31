@@ -7,6 +7,8 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { OtpModule } from './otp/otp.module';
+import { OrdersModule } from './orders/orders.module';
+import { PrinterModule } from './printer/printer.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { OtpModule } from './otp/otp.module';
     UsersModule,
     AuthModule,
     OtpModule,
+    OrdersModule,
+    PrinterModule
   ],
   controllers: [AppController],
   providers: [AppService],

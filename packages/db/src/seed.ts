@@ -149,10 +149,10 @@ async function seedUsers() {
   const admin = await prisma.user.create({
     data: {
       name: 'Administrator',
-      username: 'admin',
-      email: 'admin@kopsiku.com',
-      phone: '082170018066',
-      passwordHash: await hashPassword('Kopsiku123::'),
+      username: 'operatorssq',
+      email: 'operator@kopsiku.com',
+      phone: '081372175558',
+      passwordHash: await hashPassword('Kopsiku@1234::'),
       role: Role.ADMIN,
       isActive: true,
       isVerified: true,

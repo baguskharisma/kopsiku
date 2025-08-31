@@ -24,8 +24,8 @@ export const VEHICLE_TYPES: VehicleTypeConfig[] = [
   // },
   {
     id: "ECONOMY",
-    name: "KopsiKu Economy",
-    description: "Standard comfortable car ride",
+    name: "Taxi KOPSI",
+    description: "Kendaraan aman dan nyaman",
     multiplier: 1.0,
     capacity: 4,
     features: ["Air Conditioning", "Music System"],

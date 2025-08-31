@@ -30,37 +30,37 @@ export function calculateDistance(lat1: number, lng1: number, lat2: number, lng2
   
   /**
    * Calculate taxi fare based on Indonesian pricing structure
-   * Rp 60,000 for first kilometer + Rp 5,000 for each additional kilometer
+   * Rp 60,000 for first kilometer + Rp 6,000 for each additional kilometer
    */
-  export function calculateFare(distanceKm: number, pickupAddress?: string, destinationAddress?: string): {
-    distance: number;
-    baseFare: number;
-    airportFare: number;
-    additionalFare: number;
-    totalFare: number;
-    additionalKm: number;
-    isAirportTrip: boolean;
-  } {
+  export function calculateFare(distanceKm: number, pickupAddress?: string, destinationAddress?: string) {
     const baseFare = 60000; // First kilometer
     const additionalKmRate = 6000; // Per additional kilometer
-    const airportFareAmount = 5000; // If it's from or going to airport
-    const additionalKm = Math.max(0, distanceKm - 1);
-    const additionalFare = additionalKm * additionalKmRate;
-    
+    const airportFareAmount = 5000;
+  
+    // raw additional km
+    const rawAdditionalKm = Math.max(0, distanceKm - 1);
+  
+    // round to 1 decimal as you prefer (consistent)
+    const additionalKm = Math.round(rawAdditionalKm * 10) / 10;
+  
+    // compute additionalFare from the rounded additionalKm (KEEP CONSISTENT)
+    const additionalFare = Math.round(additionalKm * additionalKmRate);
+  
     // Check if it's an airport trip
-    const isAirportTrip = (pickupAddress && isAirportLocation(pickupAddress)) || 
+    const isAirportTrip = (pickupAddress && isAirportLocation(pickupAddress)) ||
                          (destinationAddress && isAirportLocation(destinationAddress));
-    
     const appliedAirportFare = isAirportTrip ? airportFareAmount : 0;
     const totalFare = baseFare + additionalFare + appliedAirportFare;
-    
+  
     return {
       distance: distanceKm,
       baseFare,
       additionalFare,
       airportFare: appliedAirportFare,
       totalFare,
-      additionalKm: Math.round(additionalKm * 10) / 10,
-      isAirportTrip: Boolean(isAirportTrip)
+      additionalKm,             // rounded
+      farePerKm: additionalKmRate, // return explicit rate to avoid recalculation bugs
+      isAirportTrip: Boolean(isAirportTrip),
     };
   }
+  
