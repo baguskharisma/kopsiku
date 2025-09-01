@@ -8,7 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { OtpModule } from './otp/otp.module';
 import { OrdersModule } from './orders/orders.module';
-import { PrinterModule } from './printer/printer.module';
+// import { PrinterModule } from './printer/printer.module';
 
 @Module({
   imports: [
@@ -22,7 +22,7 @@ import { PrinterModule } from './printer/printer.module';
     AuthModule,
     OtpModule,
     OrdersModule,
-    PrinterModule
+    // PrinterModule
   ],
   controllers: [AppController],
   providers: [AppService],

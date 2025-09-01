@@ -4,45 +4,52 @@ import { cookies } from 'next/headers';
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
 
 export async function POST(req: Request) {
-	const cookieStore = await cookies();
-	const accessToken = cookieStore.get('access_token')?.value;
-	const deviceId = cookieStore.get('device_id')?.value;
+	try {
+		const cookieStore = await cookies();
+		const accessToken = cookieStore.get('access_token')?.value;
+		const deviceId = cookieStore.get('device_id')?.value;
 
-	if (accessToken) {
-		await fetch(`${API_BASE}/auth/logout`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${accessToken}`,
-			},
-			body: JSON.stringify({ deviceId }),
-		}).catch(() => {});
-	}
+		// Call backend logout jika ada token
+		if (accessToken) {
+			try {
+				await fetch(`${API_BASE}/auth/logout`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						Authorization: `Bearer ${accessToken}`,
+					},
+					body: JSON.stringify({ deviceId }),
+				});
+			} catch (backendError) {
+				console.warn('Backend logout failed, but continuing with cookie cleanup:', backendError);
+			}
+		}
 
-	// Gunakan protokol request untuk menentukan secure flag secara dinamis
-	const url = new URL(req.url);
-	const isHttps = url.protocol === 'https:';
-	const isProd = process.env.NODE_ENV === 'production' || isHttps;
-	const res = NextResponse.json({ message: 'Logged out' }, { status: 200 });
+		// Determine secure flag
+		const url = new URL(req.url);
+		const isHttps = url.protocol === 'https:';
+		const isProd = process.env.NODE_ENV === 'production' || isHttps;
+		
+		const response = NextResponse.json({ message: 'Logged out successfully' }, { status: 200 });
 
-	// Hapus cookies
-	for (const name of ['access_token', 'refresh_token']) {
-		res.cookies.set(name, '', {
+		// Clear all auth-related cookies
+		const cookieOptions = {
 			httpOnly: true,
 			secure: isProd,
-			sameSite: 'lax',
+			sameSite: 'lax' as const,
 			path: '/',
-			maxAge: 0,
-		});
-	}
-	// device_id boleh disimpan, tapi jika ingin bersihkan:
-	res.cookies.set('device_id', '', {
-		httpOnly: true,
-		secure: isProd,
-		sameSite: 'lax',
-		path: '/',
-		maxAge: 0,
-	});
+			maxAge: 0, // This deletes the cookie
+		};
 
-	return res;
+		response.cookies.set('access_token', '', cookieOptions);
+		response.cookies.set('refresh_token', '', cookieOptions);
+		
+		// Optional: keep device_id or clear it
+		// response.cookies.set('device_id', '', cookieOptions);
+
+		return response;
+	} catch (error) {
+		console.error('Logout API error:', error);
+		return NextResponse.json({ error: 'Logout failed' }, { status: 500 });
+	}
 }

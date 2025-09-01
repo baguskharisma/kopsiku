@@ -5,11 +5,14 @@ import Link from "next/link"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import { Menu, User, Phone } from "lucide-react"
+import { Menu, User, Phone, LogIn } from "lucide-react"
 import { MobileNav } from "@/components/mobile-nav"
+import { LogoutButton } from "./auth/logout-button"
+import { useAuth } from "@/lib/use-auth"
 
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
+  const { isAuthenticated, isLoading } = useAuth()
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -59,24 +62,38 @@ export function Header() {
                 alt="KOPSI Pekanbaru"
                 width={100}
                 height={100}
-                // className="rounded-full"
               />
               <span className="font-bold">Pekanbaru</span>
             </Link>
           </div>
           <nav className="flex items-center space-x-2">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/profile">
-                <User className="h-4 w-4" />
-                <span className="sr-only">Profile</span>
-              </Link>
-            </Button>
+            {isAuthenticated && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/profile">
+                  <User className="h-4 w-4" />
+                  <span className="sr-only">Profile</span>
+                </Link>
+              </Button>
+            )}
             <Button variant="ghost" size="sm" asChild>
               <Link href="tel:+6276112345678">
                 <Phone className="h-4 w-4" />
                 <span className="sr-only">Call</span>
               </Link>
             </Button>
+            {!isLoading && (
+              <span className="hidden md:inline-block">
+                {isAuthenticated ? (
+                  <LogoutButton />
+                ) : (
+                  <Button size="sm" asChild>
+                    <Link href="/login">
+                      Masuk
+                    </Link>
+                  </Button>
+                )}
+              </span>
+            )}
           </nav>
         </div>
       </div>

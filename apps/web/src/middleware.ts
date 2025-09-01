@@ -7,17 +7,25 @@ export function middleware(req: NextRequest) {
 	const token = req.cookies.get(AUTH_COOKIE)?.value;
 	const url = req.nextUrl;
 
-	const isAuthPage = url.pathname.startsWith('/');
-	const isProtected = !isAuthPage; // semua selain login dianggap protected; sesuaikan jika perlu
+	// Route yang tidak memerlukan autentikasi
+	const publicRoutes = ['/login'];
+	
+	// Route yang memerlukan autentikasi
+	const protectedRoutes = ['/', '/dashboard', '/taxi'];
 
-	// Jika sudah login, jangan biarkan ke halaman login
-	if (token && isAuthPage) {
+	const isPublicRoute = publicRoutes.some(route => url.pathname === route);
+	const isProtectedRoute = protectedRoutes.some(route => 
+		url.pathname === route || url.pathname.startsWith(route + '/')
+	);
+
+	// Jika sudah login dan mencoba akses halaman login, redirect ke dashboard/home
+	if (token && isPublicRoute) {
 		const target = new URL('/', req.url);
 		return NextResponse.redirect(target);
 	}
 
-	// Jika belum login, jangan biarkan ke halaman protected
-	if (!token && isProtected) {
+	// Jika belum login dan mencoba akses halaman yang dilindungi, redirect ke login
+	if (!token && isProtectedRoute) {
 		const target = new URL('/login', req.url);
 		return NextResponse.redirect(target);
 	}
@@ -28,10 +36,10 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-	// Sesuaikan daftar route yang ingin diawasi
 	matcher: [
 		'/',
 		'/dashboard/:path*',
+		'/taxi/:path*',
 		'/login',
 	],
 };

@@ -8,22 +8,14 @@ import { JwtStrategy } from "src/strategies/jwt.strategy";
 import { AuthController } from "./auth.controller";
 import { UsersModule } from "src/users/users.module";
 import { OtpModule } from "src/otp/otp.module";
+import { SharedJwtModule } from "src/strategies/shared-jwt.module";
 
 @Module({
     imports: [
         UsersModule,
         OtpModule,
         PassportModule,
-        JwtModule.registerAsync({
-            imports: [ConfigModule],
-            useFactory: async (configService: ConfigService) => ({
-                secret: configService.get<string>('JWT_SECRET'),
-                signOptions: {
-                    expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h')
-                },
-            }),
-            inject: [ConfigService],
-        }),
+        SharedJwtModule,
     ],
     providers: [AuthService, LocalStrategy, JwtStrategy],
     controllers: [AuthController],
