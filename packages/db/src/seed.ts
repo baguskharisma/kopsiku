@@ -152,7 +152,7 @@ async function seedUsers() {
       username: 'operatorssq',
       email: 'operator@kopsiku.com',
       phone: '081372175558',
-      passwordHash: await hashPassword('Kopsiku@1234::'),
+      passwordHash: await hashPassword('KopsikuPekanbaru@1234::'),
       role: Role.ADMIN,
       isActive: true,
       isVerified: true,

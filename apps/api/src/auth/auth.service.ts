@@ -31,13 +31,48 @@ export class AuthService {
         // Validate user credentials
         const user = await this.validateUser(phone, password);
         if (!user) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+
+        if (!user.isActive) {
             throw new UnauthorizedException('Account is deactivated');
+        }
+
+        // Check if user is already logged in on another device
+        const existingActiveTokens = await this.usersService.getActiveRefreshTokens(user.id);
+        
+        if (existingActiveTokens.length > 0) {
+            // Check if any of the existing tokens is from a different device
+            const differentDeviceToken = existingActiveTokens.find(token => 
+                token.deviceId && deviceId && token.deviceId !== deviceId
+            );
+            
+            if (differentDeviceToken) {
+                throw new UnauthorizedException(
+                    'Akun sudah login di perangkat lain. Silakan logout dari perangkat sebelumnya terlebih dahulu.'
+                );
+            }
+
+            // If same device, revoke old tokens first
+            if (deviceId) {
+                const sameDeviceTokens = existingActiveTokens.filter(token => 
+                    token.deviceId === deviceId
+                );
+                if (sameDeviceTokens.length > 0) {
+                    await this.usersService.revokeRefreshTokensByDevice(user.id, deviceId);
+                }
+            } else {
+                // If no deviceId provided, check if there are any active tokens
+                throw new UnauthorizedException(
+                    'Akun sudah login di perangkat lain. Silakan logout dari perangkat sebelumnya terlebih dahulu.'
+                );
+            }
         }
 
         // Generate tokens
         const tokens = await this.generateTokens(user);
 
-        // Save refresh token
+        // Save refresh token with device info
         await this.usersService.saveRefreshToken(user.id, tokens.refreshToken, deviceId);
 
         // Update last login
@@ -102,22 +137,27 @@ export class AuthService {
                 throw new UnauthorizedException('Pengguna tidak ditemukan');
             }
 
-            // Verify refresh token exists in database
+            if (!user.isActive) {
+                throw new UnauthorizedException('Akun tidak aktif');
+            }
+
+            // Verify refresh token exists in database and is not revoked
             const isValidRefreshToken = await this.usersService.validateRefreshToken(
                 user.id,
                 refreshTokenDto.refreshToken,
             );
 
             if (!isValidRefreshToken) {
-                throw new UnauthorizedException('Refresh token tidak valid');
+                throw new UnauthorizedException('Refresh token tidak valid atau sudah kadaluarsa');
             }
 
             // Generate new tokens
             const tokens = await this.generateTokens(user);
 
             // Update refresh token
-            await this.usersService.saveRefreshToken(
+            await this.usersService.updateRefreshToken(
                 user.id,
+                refreshTokenDto.refreshToken,
                 tokens.refreshToken,
                 refreshTokenDto.deviceId,
             );
@@ -129,8 +169,30 @@ export class AuthService {
     }
 
     async logout(userId: string, deviceId?: string) {
-        await this.usersService.revokeRefreshToken(userId, deviceId);
+        if (deviceId) {
+            await this.usersService.revokeRefreshTokensByDevice(userId, deviceId);
+        } else {
+            await this.usersService.revokeAllRefreshTokens(userId);
+        }
         return { message: 'Logged out successfully' };
+    }
+
+    // Method to force logout from all devices (admin function)
+    async logoutAllDevices(userId: string) {
+        await this.usersService.revokeAllRefreshTokens(userId);
+        return { message: 'Logged out from all devices successfully' };
+    }
+
+    // Method to get active sessions
+    async getActiveSessions(userId: string) {
+        const activeTokens = await this.usersService.getActiveRefreshTokens(userId);
+        return activeTokens.map(token => ({
+            deviceId: token.deviceId,
+            userAgent: token.userAgent,
+            ipAddress: token.ipAddress,
+            lastUsedAt: token.lastUsedAt,
+            createdAt: token.createdAt,
+        }));
     }
 
     private async generateTokens(user: any) {
@@ -138,17 +200,18 @@ export class AuthService {
             sub: user.id,
             phone: user.phone,
             role: user.role,
+            iat: Math.floor(Date.now() / 1000), // Add issued at time
         };
 
         const [accessToken, refreshToken] = await Promise.all([
-            this.jwtService.signAsync(payload),
+            this.jwtService.signAsync(payload, { expiresIn: '1h' }), // Shorter access token
             this.jwtService.signAsync(payload, { expiresIn: '7d' }),
         ]);
 
         return {
             accessToken,
             refreshToken,
-            expiresIn: 24 * 60 * 60, // 24 hours in seconds
+            expiresIn: 60 * 60, // 1 hour in seconds
         };
     }
 }
