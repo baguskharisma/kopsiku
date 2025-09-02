@@ -340,6 +340,9 @@ const handleDownloadReceipt = async () => {
     const EXTRA_VALUE_GAP = 8 * SCALE;      // extra offset between key and first value line
     const EXTRA_BLOCK_GAP = 12 * SCALE;     // extra gap between blocks (e.g. after subtotal)
 
+    // NEW: extra gap between logo and title
+    const EXTRA_LOGO_TITLE_GAP = 18 * SCALE; // adjust this to increase/reduce gap
+
     // Helper to create font string
     const fontStr = (size: number, weight: 'normal' | 'bold' = 'normal') =>
       `${weight === 'bold' ? 'bold ' : ''}${Math.round(size)}px Arial, sans-serif`;
@@ -528,7 +531,8 @@ const handleDownloadReceipt = async () => {
     const logoImg = await loadLogoImage();
     const logoSize = 48 * SCALE;
     tempCtx.drawImage(logoImg, width / 2 - logoSize / 2, yPos, logoSize, logoSize);
-    yPos += logoSize + (12 * SCALE); // larger gap after logo
+    // apply extra gap between logo and title
+    yPos += logoSize + (12 * SCALE) + EXTRA_LOGO_TITLE_GAP;
 
     // Company name
     yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, FS_BOLD_MD, 'bold', 'center');
@@ -622,7 +626,7 @@ const handleDownloadReceipt = async () => {
     yPos += 10 * SCALE;
 
     // TOTAL
-    tempCtx.font = fontStr(24 * SCALE, 'bold');
+    tempCtx.font = fontStr(28 * SCALE, 'bold');
     tempCtx.textAlign = 'left';
     tempCtx.fillText('TOTAL', leftMargin, yPos);
     tempCtx.textAlign = 'right';
@@ -659,11 +663,11 @@ const handleDownloadReceipt = async () => {
     yPos += qrSize + (14 * SCALE);
 
     // QR description
-    tempCtx.fillStyle = '#666666';
-    tempCtx.font = fontStr(FS_XS, 'normal');
-    tempCtx.textAlign = 'center';
-    tempCtx.fillText('Scan untuk verifikasi receipt', width / 2, yPos);
-    yPos += 16 * SCALE;
+    // tempCtx.fillStyle = '#666666';
+    // tempCtx.font = fontStr(FS_XS, 'normal');
+    // tempCtx.textAlign = 'center';
+    // tempCtx.fillText('Scan untuk verifikasi receipt', width / 2, yPos);
+    // yPos += 16 * SCALE;
 
     // Footer note (wrap) with larger lineHeight
     tempCtx.fillStyle = '#666666';
@@ -711,6 +715,7 @@ const handleDownloadReceipt = async () => {
     });
   }
 };
+
 
 
 
