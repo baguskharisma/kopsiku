@@ -66,7 +66,7 @@ export async function middleware(req: NextRequest) {
 	const publicRoutes = ['/login', '/register'];
 	
 	// Route yang memerlukan autentikasi
-	const protectedRoutes = ['/', '/dashboard'];
+	const protectedRoutes = ['/', '/dashboard', '/taxi', '/driver'];
 
 	const isPublicRoute = publicRoutes.includes(url.pathname);
 	const isProtectedRoute = protectedRoutes.some(route => {
@@ -187,6 +187,6 @@ export const config = {
 		'/register',
 		// Dynamic paths
 		'/dashboard/:path*',
-		// '/taxi/:path*',
+		'/taxi/:path*'
 	],
 };
