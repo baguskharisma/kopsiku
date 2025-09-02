@@ -670,8 +670,8 @@ const handleDownloadReceipt = async () => {
     // yPos += 16 * SCALE;
 
     // Footer note (wrap) with larger lineHeight
-    tempCtx.fillStyle = '#666666';
-    tempCtx.font = `italic ${Math.round(12 * SCALE)}px Arial, sans-serif`;
+    tempCtx.fillStyle = '#000000';
+    tempCtx.font = `bold ${Math.round(14 * SCALE)}px Arial, sans-serif`;
     tempCtx.textAlign = 'left';
     const noteText = 'Catatan: Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.';
     yPos = wrapText(noteText, leftMargin, yPos, contentWidth, 12 * SCALE, Math.round(14 * SCALE), 'left');
