@@ -1,20 +1,21 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://kopsiku.com:3001/api/v1';
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const cookieStore = await cookies();
-    const accessToken = cookieStore.get('access_token')?.value;
-
-    console.log('🔑 Token from cookie:', accessToken ? 'Present' : 'Missing');
+    const cookieStore = cookies();
+    const accessToken = (await cookieStore).get('access_token')?.value;
 
     if (!accessToken) {
-      return NextResponse.json({ error: 'No token found' }, { status: 401 });
+      return NextResponse.json(
+        { message: 'No token found' },
+        { status: 401 }
+      );
     }
 
-    // Verify token dengan backend
+    // Verify token with backend
     const response = await fetch(`${API_BASE}/auth/verify-token`, {
       method: 'POST',
       headers: {
@@ -23,20 +24,20 @@ export async function GET(req: Request) {
       },
     });
 
-    console.log('🌐 Backend verify response:', response.status);
-
     if (!response.ok) {
-      return NextResponse.json({ error: 'Token invalid' }, { status: 401 });
+      return NextResponse.json(
+        { message: 'Token invalid' },
+        { status: 401 }
+      );
     }
 
-    const userData = await response.json();
-    return NextResponse.json({ 
-      valid: true, 
-      user: userData.user 
-    });
-
+    const data = await response.json();
+    return NextResponse.json(data);
   } catch (error) {
-    console.error('❌ Verify error:', error);
-    return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
+    console.error('Verify token error:', error);
+    return NextResponse.json(
+      { message: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

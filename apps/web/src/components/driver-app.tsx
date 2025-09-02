@@ -13,7 +13,14 @@ import {
   Wifi,
   WifiOff,
   Battery,
-  Signal
+  Signal,
+  Bell,
+  MessageCircle,
+  Zap,
+  History,
+  TrendingUp,
+  Star,
+  Route
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,11 +28,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-// Mock data for demonstration
+// Types
 interface OrderData {
   id: string;
   orderNumber: string;
-  status: 'DRIVER_ASSIGNED' | 'DRIVER_ACCEPTED' | 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED';
+  status: 'PENDING' | 'DRIVER_ASSIGNED' | 'DRIVER_ACCEPTED' | 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED';
   passengerName: string;
   passengerPhone: string;
   pickupAddress: string;
@@ -39,6 +46,12 @@ interface OrderData {
   estimatedDuration: number;
   specialRequests?: string;
   vehicleType: 'MOTORCYCLE' | 'ECONOMY' | 'PREMIUM';
+  fleetInfo?: {
+    plateNumber: string;
+    brand: string;
+    model: string;
+    color: string;
+  };
 }
 
 interface DriverStats {
@@ -49,11 +62,46 @@ interface DriverStats {
   rating: number;
 }
 
+interface WebSocketMessage {
+  event: string;
+  data: any;
+  timestamp: string;
+}
+
+interface NotificationMessage {
+  id: string;
+  type: 'order_assignment' | 'system' | 'emergency' | 'operator';
+  title: string;
+  message: string;
+  priority: 'low' | 'medium' | 'high';
+  timestamp: string;
+  data?: any;
+}
+
+interface TripHistory {
+  id: string;
+  orderNumber: string;
+  date: string;
+  passengerName: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  fare: number;
+  status: string;
+  duration: number;
+}
+
 const DriverApp: React.FC = () => {
-  const [isOnline, setIsOnline] = useState(true);
+  // Connection state
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [isOnline, setIsOnline] = useState(true);
+  
+  // Order state
   const [currentOrder, setCurrentOrder] = useState<OrderData | null>(null);
   const [incomingOrder, setIncomingOrder] = useState<OrderData | null>(null);
+  const [orderTimeout, setOrderTimeout] = useState<number | null>(null);
+  
+  // Driver state
   const [driverStats, setDriverStats] = useState<DriverStats>({
     totalTrips: 127,
     completedTrips: 123,
@@ -61,100 +109,357 @@ const DriverApp: React.FC = () => {
     todayTrips: 8,
     rating: 4.8
   });
+  
+  // Location state
   const [location, setLocation] = useState({ lat: -6.2088, lng: 106.8456 });
   const [battery, setBattery] = useState(85);
-  const [notifications, setNotifications] = useState<string[]>([]);
+  
+  // Notification state
+  const [notifications, setNotifications] = useState<NotificationMessage[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  
+  // Trip history
+  const [tripHistory] = useState<TripHistory[]>([
+    {
+      id: '1',
+      orderNumber: 'TXB-20250902-001',
+      date: '2025-09-02T08:30:00Z',
+      passengerName: 'Ahmad Rizki',
+      pickupAddress: 'Jl. Sudirman No. 45, Pekanbaru',
+      dropoffAddress: 'Sultan Syarif Kasim II Airport',
+      fare: 125000,
+      status: 'COMPLETED',
+      duration: 35
+    },
+    {
+      id: '2',
+      orderNumber: 'TXB-20250902-002',
+      date: '2025-09-02T10:15:00Z',
+      passengerName: 'Siti Nurhaliza',
+      pickupAddress: 'Mall Pekanbaru',
+      dropoffAddress: 'Universitas Riau',
+      fare: 45000,
+      status: 'COMPLETED',
+      duration: 18
+    },
+    {
+      id: '3',
+      orderNumber: 'TXB-20250902-003',
+      date: '2025-09-02T12:45:00Z',
+      passengerName: 'Budi Santoso',
+      pickupAddress: 'RS Awal Bros',
+      dropoffAddress: 'Pasar Bawah',
+      fare: 35000,
+      status: 'COMPLETED',
+      duration: 15
+    }
+  ]);
+  
+  // WebSocket refs
+  const wsRef = useRef<WebSocket | null>(null);
+  const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Mock auth token - in real app this would come from auth context
+  const authToken = "mock-jwt-token";
+  const driverId = "driver-123";
 
-  // Mock WebSocket connection simulation
+  // Demo: Simulate incoming order
   useEffect(() => {
-    // Simulate connection
-    const connectTimer = setTimeout(() => {
-      setIsConnected(true);
-    }, 1000);
-
-    // Simulate incoming order
-    const orderTimer = setTimeout(() => {
-      if (isOnline && !currentOrder) {
+    const timer = setTimeout(() => {
+      if (isOnline && isConnected && !currentOrder && !incomingOrder) {
         const mockOrder: OrderData = {
-          id: 'order-123',
-          orderNumber: 'TXB-20241201-001',
+          id: 'order-demo-' + Date.now(),
+          orderNumber: 'TXB-20250902-004',
           status: 'DRIVER_ASSIGNED',
-          passengerName: 'Budi Santoso',
-          passengerPhone: '+628123456789',
-          pickupAddress: 'Bandara Sultan Syarif Kasim II - Terminal Domestik',
-          dropoffAddress: 'Jl. Sudirman No. 123, Pekanbaru',
+          passengerName: 'Maya Sari',
+          passengerPhone: '+62 812-3456-7890',
+          pickupAddress: 'Jl. Jenderal Sudirman No. 123, Pekanbaru, Riau',
+          dropoffAddress: 'Sultan Syarif Kasim II Airport, Pekanbaru',
           pickupLat: -6.2088,
           pickupLng: 106.8456,
-          dropoffLat: -6.2297,
-          dropoffLng: 106.8251,
-          estimatedFare: 75000,
-          distanceKm: 24.8,
-          estimatedDuration: 35,
-          specialRequests: 'Mohon tunggu di zona pickup A3',
-          vehicleType: 'ECONOMY'
+          dropoffLat: -6.1754,
+          dropoffLng: 106.8352,
+          estimatedFare: 150000,
+          distanceKm: 25.5,
+          estimatedDuration: 40,
+          specialRequests: 'Please call when arrived. Passenger has luggage.',
+          vehicleType: 'ECONOMY',
+          fleetInfo: {
+            plateNumber: 'BM 1856 QU',
+            brand: 'Toyota',
+            model: 'Avanza',
+            color: 'Silver'
+          }
         };
-        setIncomingOrder(mockOrder);
-        addNotification('Pesanan baru diterima!');
+        handleNewOrderAssignment({ ...mockOrder, timeout: 120 });
       }
-    }, 3000);
-
-    return () => {
-      clearTimeout(connectTimer);
-      clearTimeout(orderTimer);
-    };
-  }, [isOnline, currentOrder]);
-
-  const addNotification = (message: string) => {
-    setNotifications(prev => [message, ...prev.slice(0, 4)]);
-    setTimeout(() => {
-      setNotifications(prev => prev.slice(0, -1));
     }, 5000);
-  };
 
-  const acceptOrder = () => {
-    if (incomingOrder) {
-      setCurrentOrder({ ...incomingOrder, status: 'DRIVER_ACCEPTED' });
-      setIncomingOrder(null);
-      addNotification('Pesanan diterima! Menuju ke lokasi pickup.');
+    return () => clearTimeout(timer);
+  }, [isOnline, isConnected, currentOrder, incomingOrder]);
+
+  // WebSocket connection management
+  useEffect(() => {
+    if (isOnline) {
+      connectWebSocket();
+    } else {
+      disconnectWebSocket();
+    }
+    
+    return () => {
+      disconnectWebSocket();
+    };
+  }, [isOnline]);
+
+  // Location tracking
+  useEffect(() => {
+    if (isOnline && isConnected) {
+      startLocationTracking();
+    } else {
+      stopLocationTracking();
+    }
+    
+    return () => stopLocationTracking();
+  }, [isOnline, isConnected]);
+
+  const connectWebSocket = () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    
+    setConnectionStatus('connecting');
+    
+    try {
+      // Simulate WebSocket connection
+      setTimeout(() => {
+        setConnectionStatus('connected');
+        setIsConnected(true);
+        addNotification('Connected to KOPSI system', 'system', 'low');
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to connect WebSocket:', error);
+      setConnectionStatus('disconnected');
     }
   };
 
-  const rejectOrder = () => {
-    setIncomingOrder(null);
-    addNotification('Pesanan ditolak.');
+  const disconnectWebSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setIsConnected(false);
+    setConnectionStatus('disconnected');
   };
 
-  const updateOrderStatus = (newStatus: OrderData['status']) => {
-    if (currentOrder) {
-      setCurrentOrder({ ...currentOrder, status: newStatus });
+  const sendMessage = (event: string, data: any) => {
+    console.log('Sending message:', { event, data });
+    // In real app, this would send through WebSocket
+  };
+
+  const handleNewOrderAssignment = (orderData: any) => {
+    const order: OrderData = {
+      id: orderData.id || orderData.orderId,
+      orderNumber: orderData.orderNumber,
+      status: 'DRIVER_ASSIGNED',
+      passengerName: orderData.passengerName,
+      passengerPhone: orderData.passengerPhone,
+      pickupAddress: orderData.pickupAddress,
+      dropoffAddress: orderData.dropoffAddress,
+      pickupLat: orderData.pickupLat,
+      pickupLng: orderData.pickupLng,
+      dropoffLat: orderData.dropoffLat,
+      dropoffLng: orderData.dropoffLng,
+      estimatedFare: orderData.estimatedFare,
+      distanceKm: orderData.distanceKm || 0,
+      estimatedDuration: orderData.estimatedDuration,
+      specialRequests: orderData.specialRequests,
+      vehicleType: orderData.vehicleType,
+      fleetInfo: orderData.fleetInfo,
+    };
+    
+    setIncomingOrder(order);
+    
+    // Set timeout countdown
+    const timeout = orderData.timeout || 120; // seconds
+    setOrderTimeout(timeout);
+    
+    const countdownInterval = setInterval(() => {
+      setOrderTimeout((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countdownInterval);
+          // Auto-reject if not responded
+          if (incomingOrder) {
+            handleRejectOrder('Timeout - no response');
+          }
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    addNotification('New trip assignment received!', 'order_assignment', 'high');
+  };
+
+  const startLocationTracking = () => {
+    if (locationIntervalRef.current) return;
+    
+    const updateLocation = () => {
+      // In a real app, use navigator.geolocation.getCurrentPosition
+      // For demo, simulate small location changes
+      const newLat = location.lat + (Math.random() - 0.5) * 0.001;
+      const newLng = location.lng + (Math.random() - 0.5) * 0.001;
       
-      const statusMessages = {
-        'DRIVER_ARRIVING': 'Tiba di lokasi pickup',
-        'IN_PROGRESS': 'Perjalanan dimulai',
-        'COMPLETED': 'Perjalanan selesai!'
-      } as const;
+      setLocation({ lat: newLat, lng: newLng });
+      
+      // Send location update to server
+      sendMessage('driver:location_update', {
+        lat: newLat,
+        lng: newLng,
+        accuracy: 10,
+        heading: Math.random() * 360,
+        speed: currentOrder?.status === 'IN_PROGRESS' ? 30 + Math.random() * 20 : 0,
+      });
+    };
+    
+    // Update location immediately and then every 10 seconds
+    updateLocation();
+    locationIntervalRef.current = setInterval(updateLocation, 10000);
+  };
 
-      if (Object.prototype.hasOwnProperty.call(statusMessages, newStatus)) {
-        addNotification(statusMessages[newStatus as keyof typeof statusMessages]);
-      }
-
-      if (newStatus === 'COMPLETED') {
-        setTimeout(() => {
-          setCurrentOrder(null);
-          setDriverStats(prev => ({
-            ...prev,
-            completedTrips: prev.completedTrips + 1,
-            todayTrips: prev.todayTrips + 1,
-            totalEarnings: prev.totalEarnings + (currentOrder?.estimatedFare || 0)
-          }));
-        }, 2000);
-      }
+  const stopLocationTracking = () => {
+    if (locationIntervalRef.current) {
+      clearInterval(locationIntervalRef.current);
+      locationIntervalRef.current = null;
     }
+  };
+
+  const addNotification = (message: string, type: NotificationMessage['type'], priority: 'low' | 'medium' | 'high') => {
+    const notification: NotificationMessage = {
+      id: Date.now().toString(),
+      type,
+      title: type === 'order_assignment' ? 'New Trip' : 
+             type === 'operator' ? 'Control Center' : 
+             type === 'emergency' ? 'Emergency' : 'System',
+      message,
+      priority,
+      timestamp: new Date().toISOString(),
+    };
+    
+    setNotifications(prev => [notification, ...prev.slice(0, 9)]); // Keep last 10
+    setUnreadCount(prev => prev + 1);
+    
+    // Auto-remove low priority notifications after 5 seconds
+    if (priority === 'low') {
+      setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== notification.id));
+      }, 5000);
+    }
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
+    setUnreadCount(0);
+  };
+
+  // Order handling functions
+  const handleAcceptOrder = () => {
+    if (!incomingOrder) return;
+    
+    sendMessage('driver:order_response', {
+      orderId: incomingOrder.id,
+      action: 'accept',
+      estimatedArrival: 5,
+      location: location,
+    });
+    
+    setCurrentOrder({ ...incomingOrder, status: 'DRIVER_ACCEPTED' });
+    setIncomingOrder(null);
+    setOrderTimeout(null);
+    addNotification('Trip accepted! Heading to pickup location.', 'system', 'medium');
+  };
+
+  const handleRejectOrder = (reason?: string) => {
+    if (!incomingOrder) return;
+    
+    sendMessage('driver:order_response', {
+      orderId: incomingOrder.id,
+      action: 'reject',
+      reason: reason || 'Driver declined',
+    });
+    
+    setIncomingOrder(null);
+    setOrderTimeout(null);
+    addNotification('Trip declined.', 'system', 'low');
+  };
+
+  const updateTripStatus = (status: 'arriving' | 'arrived' | 'started' | 'completed', notes?: string) => {
+    if (!currentOrder) return;
+    
+    sendMessage('driver:trip_update', {
+      orderId: currentOrder.id,
+      status,
+      location: location,
+      notes,
+      odometerReading: status === 'completed' ? Math.floor(Math.random() * 1000) + 50000 : undefined,
+    });
+    
+    // Update local status
+    const statusMap = {
+      'arriving': 'DRIVER_ARRIVING' as const,
+      'arrived': 'DRIVER_ARRIVING' as const,
+      'started': 'IN_PROGRESS' as const,
+      'completed': 'COMPLETED' as const,
+    };
+    
+    if (status === 'completed') {
+      // Trip completed - update stats and clear current order
+      setDriverStats(prev => ({
+        ...prev,
+        completedTrips: prev.completedTrips + 1,
+        todayTrips: prev.todayTrips + 1,
+        totalEarnings: prev.totalEarnings + (currentOrder?.estimatedFare || 0),
+      }));
+      
+      setTimeout(() => {
+        setCurrentOrder(null);
+      }, 3000);
+      
+      addNotification('Trip completed! You are now available for new trips.', 'system', 'medium');
+    } else {
+      setCurrentOrder(prev => prev ? { ...prev, status: statusMap[status] } : null);
+      
+      const messages = {
+        'arriving': 'Heading to pickup location',
+        'arrived': 'Arrived at pickup location',
+        'started': 'Trip started - en route to destination',
+        'completed': 'Trip completed successfully',
+      };
+      
+      addNotification(messages[status], 'system', 'low');
+    }
+  };
+
+  const handleEmergency = (type: 'panic' | 'accident' | 'breakdown' | 'medical') => {
+    sendMessage('driver:emergency', {
+      type,
+      location: location,
+      message: `Emergency situation: ${type}`,
+      orderId: currentOrder?.id,
+    });
+    
+    addNotification(`Emergency alert sent: ${type}`, 'emergency', 'high');
   };
 
   const toggleOnlineStatus = () => {
-    setIsOnline(!isOnline);
-    addNotification(isOnline ? 'Anda sekarang offline' : 'Anda sekarang online');
+    const newStatus = !isOnline;
+    setIsOnline(newStatus);
+    
+    if (newStatus) {
+      connectWebSocket();
+      addNotification('Going online...', 'system', 'medium');
+    } else {
+      disconnectWebSocket();
+      addNotification('Going offline...', 'system', 'medium');
+    }
   };
 
   const formatCurrency = (amount: number) => {
@@ -178,12 +483,22 @@ const DriverApp: React.FC = () => {
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'DRIVER_ASSIGNED': return 'Pesanan Masuk';
-      case 'DRIVER_ACCEPTED': return 'Menuju Pickup';
-      case 'DRIVER_ARRIVING': return 'Tiba di Pickup';
-      case 'IN_PROGRESS': return 'Dalam Perjalanan';
-      case 'COMPLETED': return 'Selesai';
+      case 'DRIVER_ASSIGNED': return 'Assignment Received';
+      case 'DRIVER_ACCEPTED': return 'Accepted - Going to Pickup';
+      case 'DRIVER_ARRIVING': return 'At Pickup Location';
+      case 'IN_PROGRESS': return 'Trip in Progress';
+      case 'COMPLETED': return 'Completed';
       default: return status;
+    }
+  };
+
+  const getConnectionIcon = () => {
+    if (connectionStatus === 'connected') {
+      return <Wifi className="w-4 h-4 text-green-600" />;
+    } else if (connectionStatus === 'connecting') {
+      return <Zap className="w-4 h-4 text-yellow-600 animate-pulse" />;
+    } else {
+      return <WifiOff className="w-4 h-4 text-red-600" />;
     }
   };
 
@@ -198,18 +513,33 @@ const DriverApp: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg font-semibold">KOPSI Driver</h1>
-              <p className="text-sm text-gray-500">BM 1856 QU • Endrizal</p>
+              <p className="text-sm text-gray-500">
+                {currentOrder?.fleetInfo?.plateNumber || 'BM 1856 QU'} • Endrizal
+              </p>
             </div>
           </div>
           
           <div className="flex items-center space-x-2">
             {/* Connection Status */}
-            <div className="flex items-center">
-              {isConnected ? (
-                <Wifi className="w-4 h-4 text-green-600" />
-              ) : (
-                <WifiOff className="w-4 h-4 text-red-600" />
-              )}
+            <div className="flex items-center" title={`Connection: ${connectionStatus}`}>
+              {getConnectionIcon()}
+            </div>
+            
+            {/* Notification Bell */}
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearNotifications}
+                className="relative"
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </Button>
             </div>
             
             {/* Battery */}
@@ -223,21 +553,41 @@ const DriverApp: React.FC = () => {
               onClick={toggleOnlineStatus}
               variant={isOnline ? "default" : "outline"}
               size="sm"
-              className={`${isOnline ? 'bg-green-600 hover:bg-green-700' : 'border-red-600 text-red-600'}`}
+              className={`${
+                isOnline 
+                  ? 'bg-green-600 hover:bg-green-700' 
+                  : 'border-red-600 text-red-600'
+              } ${connectionStatus === 'connecting' ? 'animate-pulse' : ''}`}
             >
-              {isOnline ? 'Online' : 'Offline'}
+              {connectionStatus === 'connecting' ? 'Connecting...' : (isOnline ? 'Online' : 'Offline')}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Notifications */}
+      {/* Notifications Panel */}
       {notifications.length > 0 && (
-        <div className="p-4 space-y-2">
-          {notifications.map((notification, index) => (
-            <Alert key={index} className="animate-slide-down">
+        <div className="p-4 space-y-2 max-h-48 overflow-y-auto">
+          {notifications.slice(0, 3).map((notification) => (
+            <Alert 
+              key={notification.id} 
+              className={`animate-slide-down ${
+                notification.priority === 'high' ? 'border-red-500 bg-red-50' :
+                notification.priority === 'medium' ? 'border-yellow-500 bg-yellow-50' :
+                'border-blue-500 bg-blue-50'
+              }`}
+            >
               <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>{notification}</AlertDescription>
+              <AlertDescription>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <strong>{notification.title}:</strong> {notification.message}
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {new Date(notification.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+              </AlertDescription>
             </Alert>
           ))}
         </div>
@@ -248,20 +598,29 @@ const DriverApp: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md animate-bounce">
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center justify-between">
-                <span className="text-lg">Pesanan Baru!</span>
-                <Badge className="bg-blue-500">{incomingOrder.orderNumber}</Badge>
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">New Trip Assignment!</CardTitle>
+                <div className="flex items-center space-x-2">
+                  <Badge className="bg-blue-500">{incomingOrder.orderNumber}</Badge>
+                  {orderTimeout && (
+                    <Badge variant="destructive" className="animate-pulse">
+                      {orderTimeout}s
+                    </Badge>
+                  )}
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-600">Penumpang</p>
+                  <p className="text-gray-600">Passenger</p>
                   <p className="font-semibold">{incomingOrder.passengerName}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">Estimasi</p>
-                  <p className="font-semibold">{formatCurrency(incomingOrder.estimatedFare)}</p>
+                  <p className="text-gray-600">Estimated Fare</p>
+                  <p className="font-semibold text-green-600">
+                    {formatCurrency(incomingOrder.estimatedFare)}
+                  </p>
                 </div>
               </div>
 
@@ -276,9 +635,24 @@ const DriverApp: React.FC = () => {
                 <div className="flex items-start space-x-2">
                   <MapPin className="w-4 h-4 text-red-600 mt-1 flex-shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">Tujuan</p>
+                    <p className="text-sm font-medium">Destination</p>
                     <p className="text-sm text-gray-600 break-words">{incomingOrder.dropoffAddress}</p>
                   </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 p-3 bg-gray-50 rounded-lg text-sm">
+                <div className="text-center">
+                  <p className="text-gray-600">Distance</p>
+                  <p className="font-semibold">{incomingOrder.distanceKm.toFixed(1)} km</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-600">Duration</p>
+                  <p className="font-semibold">{incomingOrder.estimatedDuration} min</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-600">Type</p>
+                  <p className="font-semibold">{incomingOrder.vehicleType}</p>
                 </div>
               </div>
 
@@ -286,26 +660,26 @@ const DriverApp: React.FC = () => {
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription className="text-sm">
-                    {incomingOrder.specialRequests}
+                    <strong>Special Request:</strong> {incomingOrder.specialRequests}
                   </AlertDescription>
                 </Alert>
               )}
 
               <div className="flex space-x-2 pt-4">
                 <Button
-                  onClick={rejectOrder}
+                  onClick={() => handleRejectOrder('Driver declined')}
                   variant="outline"
                   className="flex-1 border-red-600 text-red-600 hover:bg-red-50"
                 >
                   <XCircle className="w-4 h-4 mr-2" />
-                  Tolak
+                  Decline
                 </Button>
                 <Button
-                  onClick={acceptOrder}
+                  onClick={handleAcceptOrder}
                   className="flex-1 bg-green-600 hover:bg-green-700"
                 >
                   <CheckCircle className="w-4 h-4 mr-2" />
-                  Terima
+                  Accept
                 </Button>
               </div>
             </CardContent>
@@ -317,9 +691,9 @@ const DriverApp: React.FC = () => {
       <div className="p-4">
         <Tabs defaultValue="active" className="w-full">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="active">Pesanan Aktif</TabsTrigger>
-            <TabsTrigger value="stats">Statistik</TabsTrigger>
-            <TabsTrigger value="history">Riwayat</TabsTrigger>
+            <TabsTrigger value="active">Active Trip</TabsTrigger>
+            <TabsTrigger value="stats">Statistics</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
           <TabsContent value="active" className="space-y-4 mt-4">
@@ -360,7 +734,7 @@ const DriverApp: React.FC = () => {
                     <div className="flex items-start space-x-3">
                       <MapPin className="w-5 h-5 text-red-600 mt-1" />
                       <div className="flex-1">
-                        <p className="font-medium">Tujuan</p>
+                        <p className="font-medium">Destination</p>
                         <p className="text-sm text-gray-600">{currentOrder.dropoffAddress}</p>
                       </div>
                     </div>
@@ -369,55 +743,75 @@ const DriverApp: React.FC = () => {
                   {/* Trip Details */}
                   <div className="grid grid-cols-3 gap-4 p-3 bg-blue-50 rounded-lg">
                     <div className="text-center">
-                      <p className="text-sm text-gray-600">Jarak</p>
+                      <p className="text-sm text-gray-600">Distance</p>
                       <p className="font-semibold">{currentOrder.distanceKm} km</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-sm text-gray-600">Waktu</p>
+                      <p className="text-sm text-gray-600">Duration</p>
                       <p className="font-semibold">{currentOrder.estimatedDuration} min</p>
                     </div>
                     <div className="text-center">
-                      <p className="text-sm text-gray-600">Tarif</p>
+                      <p className="text-sm text-gray-600">Fare</p>
                       <p className="font-semibold">{formatCurrency(currentOrder.estimatedFare)}</p>
                     </div>
                   </div>
+
+                  {/* Special Requests */}
+                  {currentOrder.specialRequests && (
+                    <Alert>
+                      <MessageCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        <strong>Special Request:</strong> {currentOrder.specialRequests}
+                      </AlertDescription>
+                    </Alert>
+                  )}
 
                   {/* Action Buttons */}
                   <div className="space-y-2">
                     {currentOrder.status === 'DRIVER_ACCEPTED' && (
                       <Button
-                        onClick={() => updateOrderStatus('DRIVER_ARRIVING')}
+                        onClick={() => updateTripStatus('arriving')}
                         className="w-full bg-yellow-600 hover:bg-yellow-700"
                       >
                         <Navigation className="w-4 h-4 mr-2" />
-                        Tiba di Pickup
+                        Arrived at Pickup
                       </Button>
                     )}
                     
                     {currentOrder.status === 'DRIVER_ARRIVING' && (
                       <Button
-                        onClick={() => updateOrderStatus('IN_PROGRESS')}
+                        onClick={() => updateTripStatus('started')}
                         className="w-full bg-purple-600 hover:bg-purple-700"
                       >
                         <Car className="w-4 h-4 mr-2" />
-                        Mulai Perjalanan
+                        Start Trip
                       </Button>
                     )}
                     
                     {currentOrder.status === 'IN_PROGRESS' && (
                       <Button
-                        onClick={() => updateOrderStatus('COMPLETED')}
+                        onClick={() => updateTripStatus('completed')}
                         className="w-full bg-green-600 hover:bg-green-700"
                       >
                         <CheckCircle className="w-4 h-4 mr-2" />
-                        Selesaikan Perjalanan
+                        Complete Trip
                       </Button>
                     )}
 
-                    <Button variant="outline" className="w-full text-red-600 border-red-600">
-                      <XCircle className="w-4 h-4 mr-2" />
-                      Batalkan Pesanan
-                    </Button>
+                    <div className="flex space-x-2">
+                      <Button variant="outline" className="flex-1 text-red-600 border-red-600">
+                        <XCircle className="w-4 h-4 mr-2" />
+                        Cancel Trip
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        className="flex-1 text-orange-600 border-orange-600"
+                        onClick={() => handleEmergency('panic')}
+                      >
+                        <AlertTriangle className="w-4 h-4 mr-2" />
+                        Emergency
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -425,10 +819,19 @@ const DriverApp: React.FC = () => {
               <Card className="text-center py-8">
                 <CardContent>
                   <Car className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-                  <p className="text-gray-600 mb-2">Tidak ada pesanan aktif</p>
+                  <p className="text-gray-600 mb-2">No active trips</p>
                   <p className="text-sm text-gray-500">
-                    {isOnline ? 'Menunggu pesanan masuk...' : 'Anda sedang offline'}
+                    {isOnline && isConnected
+                      ? 'Waiting for trip assignments...'
+                      : isOnline
+                      ? 'Connecting to system...'
+                      : 'You are currently offline'}
                   </p>
+                  {!isOnline && (
+                    <Button onClick={toggleOnlineStatus} className="mt-4">
+                      Go Online
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -440,7 +843,7 @@ const DriverApp: React.FC = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600">Trip Hari Ini</p>
+                      <p className="text-sm text-gray-600">Trips Today</p>
                       <p className="text-2xl font-bold text-blue-600">{driverStats.todayTrips}</p>
                     </div>
                     <Car className="w-8 h-8 text-blue-600" />
@@ -452,7 +855,7 @@ const DriverApp: React.FC = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600">Pendapatan Hari Ini</p>
+                      <p className="text-sm text-gray-600">Today's Earnings</p>
                       <p className="text-lg font-bold text-green-600">
                         {formatCurrency(driverStats.todayTrips * 87500)}
                       </p>
@@ -466,7 +869,7 @@ const DriverApp: React.FC = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-gray-600">Total Trip</p>
+                      <p className="text-sm text-gray-600">Total Trips</p>
                       <p className="text-2xl font-bold text-purple-600">{driverStats.completedTrips}</p>
                     </div>
                     <CheckCircle className="w-8 h-8 text-purple-600" />
@@ -490,45 +893,77 @@ const DriverApp: React.FC = () => {
             {/* Earnings Summary */}
             <Card>
               <CardHeader>
-                <CardTitle>Ringkasan Pendapatan</CardTitle>
+                <CardTitle className="flex items-center">
+                  <TrendingUp className="w-5 h-5 mr-2" />
+                  Earnings Summary
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
-                  <span className="font-medium">Total Pendapatan</span>
-                  <span className="text-lg font-bold text-green-600">
-                    {formatCurrency(driverStats.totalEarnings)}
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Rata-rata per Trip</span>
-                    <span className="font-semibold">
-                      {formatCurrency(Math.round(driverStats.totalEarnings / driverStats.completedTrips))}
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Total Earnings</span>
+                    <span className="font-semibold text-lg">
+                      {formatCurrency(driverStats.totalEarnings)}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Trip Sukses</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Today's Earnings</span>
+                    <span className="font-semibold text-green-600">
+                      {formatCurrency(driverStats.todayTrips * 87500)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Average per Trip</span>
                     <span className="font-semibold">
-                      {Math.round((driverStats.completedTrips / driverStats.totalTrips) * 100)}%
+                      {formatCurrency(driverStats.totalEarnings / driverStats.completedTrips)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Completion Rate</span>
+                    <span className="font-semibold text-green-600">
+                      {((driverStats.completedTrips / driverStats.totalTrips) * 100).toFixed(1)}%
                     </span>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
 
-                {/* Weekly Chart Placeholder */}
-                <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center">
-                  <p className="text-gray-500 text-sm">Grafik Pendapatan Mingguan</p>
-                  <div className="flex items-end justify-center space-x-2 mt-4">
-                    {[40, 65, 45, 80, 70, 90, 60].map((height, index) => (
-                      <div
-                        key={index}
-                        className="bg-blue-500 rounded-t"
-                        style={{ height: `${height}px`, width: '20px' }}
-                      ></div>
-                    ))}
+            {/* Connection Status */}
+            <Card>
+              <CardHeader>
+                <CardTitle>System Status</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Connection Status</span>
+                    <Badge 
+                      className={
+                        connectionStatus === 'connected' ? 'bg-green-500' :
+                        connectionStatus === 'connecting' ? 'bg-yellow-500' :
+                        'bg-red-500'
+                      }
+                    >
+                      {connectionStatus}
+                    </Badge>
                   </div>
-                  <div className="flex justify-center space-x-4 mt-2 text-xs text-gray-600">
-                    <span>Sen</span><span>Sel</span><span>Rab</span><span>Kam</span><span>Jum</span><span>Sab</span><span>Min</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Online Status</span>
+                    <Badge className={isOnline ? 'bg-green-500' : 'bg-gray-500'}>
+                      {isOnline ? 'Online' : 'Offline'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Location Tracking</span>
+                    <Badge className={locationIntervalRef.current ? 'bg-green-500' : 'bg-gray-500'}>
+                      {locationIntervalRef.current ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Current Location</span>
+                    <span className="text-xs font-mono">
+                      {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+                    </span>
                   </div>
                 </div>
               </CardContent>
@@ -536,119 +971,115 @@ const DriverApp: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="history" className="space-y-4 mt-4">
-            {/* Recent Orders History */}
             <Card>
               <CardHeader>
-                <CardTitle>Riwayat Pesanan Terakhir</CardTitle>
+                <CardTitle className="flex items-center">
+                  <History className="w-5 h-5 mr-2" />
+                  Recent Trips
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {[
-                    {
-                      id: 1,
-                      orderNumber: 'TXB-20241130-089',
-                      passenger: 'Ahmad Rizki',
-                      from: 'Mall SKA Pekanbaru',
-                      to: 'Universitas Riau',
-                      fare: 65000,
-                      status: 'completed',
-                      time: '14:30'
-                    },
-                    {
-                      id: 2,
-                      orderNumber: 'TXB-20241130-085',
-                      passenger: 'Siti Aminah',
-                      from: 'Bandara SSK II',
-                      to: 'Hotel Pangeran Pekanbaru',
-                      fare: 85000,
-                      status: 'completed',
-                      time: '12:15'
-                    },
-                    {
-                      id: 3,
-                      orderNumber: 'TXB-20241130-078',
-                      passenger: 'Budi Santoso',
-                      from: 'RS Awal Bros',
-                      to: 'Jl. Sudirman',
-                      fare: 45000,
-                      status: 'completed',
-                      time: '10:45'
-                    },
-                    {
-                      id: 4,
-                      orderNumber: 'TXB-20241130-072',
-                      passenger: 'Linda Sari',
-                      from: 'Pasar Bawah',
-                      to: 'Bandara SSK II',
-                      fare: 95000,
-                      status: 'cancelled',
-                      time: '09:20'
-                    },
-                  ].map((order) => (
-                    <div key={order.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-sm font-medium truncate">{order.orderNumber}</p>
-                          <span className="text-xs text-gray-500">{order.time}</span>
+                <div className="space-y-3">
+                  {tripHistory.map((trip) => (
+                    <div key={trip.id} className="border rounded-lg p-3 hover:bg-gray-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <Badge variant="outline">{trip.orderNumber}</Badge>
+                          <Badge 
+                            className={trip.status === 'COMPLETED' ? 'bg-green-500' : 'bg-gray-500'}
+                          >
+                            {trip.status}
+                          </Badge>
                         </div>
-                        <p className="text-sm text-gray-600 mb-1">{order.passenger}</p>
-                        <div className="text-xs text-gray-500">
-                          <p className="truncate">{order.from}</p>
-                          <p className="truncate">→ {order.to}</p>
+                        <span className="text-sm text-gray-500">
+                          {new Date(trip.date).toLocaleDateString('id-ID')}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2 mb-2">
+                        <User className="w-4 h-4 text-gray-600" />
+                        <span className="font-semibold text-sm">{trip.passengerName}</span>
+                      </div>
+                      
+                      <div className="space-y-1 mb-3">
+                        <div className="flex items-start space-x-2">
+                          <MapPin className="w-3 h-3 text-green-600 mt-1 flex-shrink-0" />
+                          <span className="text-xs text-gray-600 break-words">
+                            {trip.pickupAddress}
+                          </span>
+                        </div>
+                        <div className="flex items-start space-x-2">
+                          <MapPin className="w-3 h-3 text-red-600 mt-1 flex-shrink-0" />
+                          <span className="text-xs text-gray-600 break-words">
+                            {trip.dropoffAddress}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex flex-col items-end ml-4">
-                        <span className="font-semibold text-sm">{formatCurrency(order.fare)}</span>
-                        <Badge 
-                          variant={order.status === 'completed' ? 'default' : 'destructive'}
-                          className="text-xs mt-1"
-                        >
-                          {order.status === 'completed' ? 'Selesai' : 'Dibatalkan'}
-                        </Badge>
+                      
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center space-x-4">
+                          <span className="text-gray-600">
+                            <Clock className="w-3 h-3 inline mr-1" />
+                            {trip.duration} min
+                          </span>
+                        </div>
+                        <span className="font-semibold text-green-600">
+                          {formatCurrency(trip.fare)}
+                        </span>
                       </div>
                     </div>
                   ))}
                 </div>
-
-                <Button variant="outline" className="w-full mt-4">
-                  Lihat Semua Riwayat
-                </Button>
+                
+                {/* Load More Button */}
+                <div className="text-center pt-4">
+                  <Button variant="outline" size="sm">
+                    Load More Trips
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
             {/* Performance Summary */}
             <Card>
               <CardHeader>
-                <CardTitle>Performa Bulan Ini</CardTitle>
+                <CardTitle className="flex items-center">
+                  <Star className="w-5 h-5 mr-2" />
+                  Performance Summary
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center p-4 bg-green-50 rounded-lg">
-                    <p className="text-2xl font-bold text-green-600">98.5%</p>
-                    <p className="text-sm text-gray-600">Acceptance Rate</p>
+                  <div className="text-center p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm text-gray-600 mb-1">This Week</p>
+                    <p className="text-xl font-bold text-blue-600">23</p>
+                    <p className="text-xs text-gray-500">trips completed</p>
                   </div>
-                  <div className="text-center p-4 bg-blue-50 rounded-lg">
-                    <p className="text-2xl font-bold text-blue-600">4.2</p>
-                    <p className="text-sm text-gray-600">Avg Trip/Day</p>
-                  </div>
-                  <div className="text-center p-4 bg-purple-50 rounded-lg">
-                    <p className="text-2xl font-bold text-purple-600">2.8%</p>
-                    <p className="text-sm text-gray-600">Cancellation Rate</p>
-                  </div>
-                  <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                    <p className="text-2xl font-bold text-yellow-600">32h</p>
-                    <p className="text-sm text-gray-600">Online Time</p>
+                  <div className="text-center p-3 bg-green-50 rounded-lg">
+                    <p className="text-sm text-gray-600 mb-1">This Month</p>
+                    <p className="text-xl font-bold text-green-600">89</p>
+                    <p className="text-xs text-gray-500">trips completed</p>
                   </div>
                 </div>
-
-                {/* Achievement Badges */}
-                <div className="mt-6">
-                  <p className="font-medium mb-3">Pencapaian</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge className="bg-gold text-white">🏆 Top Performer</Badge>
-                    <Badge className="bg-blue-500">⭐ 5 Star Rating</Badge>
-                    <Badge className="bg-green-500">✅ Reliable Driver</Badge>
-                    <Badge className="bg-purple-500">🚗 100+ Trips</Badge>
+                
+                <div className="mt-4 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Weekly Target</span>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-24 bg-gray-200 rounded-full h-2">
+                        <div className="bg-blue-600 h-2 rounded-full" style={{ width: '76%' }}></div>
+                      </div>
+                      <span className="text-sm font-semibold">23/30</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-600">Monthly Target</span>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-24 bg-gray-200 rounded-full h-2">
+                        <div className="bg-green-600 h-2 rounded-full" style={{ width: '74%' }}></div>
+                      </div>
+                      <span className="text-sm font-semibold">89/120</span>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -657,38 +1088,85 @@ const DriverApp: React.FC = () => {
         </Tabs>
       </div>
 
-      {/* Bottom Navigation Bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg">
-        <div className="flex justify-around items-center py-2">
-          <Button variant="ghost" size="sm" className="flex flex-col items-center">
-            <MapPin className="w-5 h-5" />
-            <span className="text-xs mt-1">Lokasi</span>
+      {/* Emergency Buttons (Quick Access) */}
+      {currentOrder && (
+        <div className="fixed bottom-4 right-4 flex flex-col space-y-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-white shadow-lg border-orange-500 text-orange-600"
+            onClick={() => handleEmergency('breakdown')}
+          >
+            <AlertTriangle className="w-4 h-4 mr-1" />
+            Breakdown
           </Button>
-          
-          <Button variant="ghost" size="sm" className="flex flex-col items-center">
-            <Phone className="w-5 h-5" />
-            <span className="text-xs mt-1">Support</span>
-          </Button>
-          
-          <Button variant="ghost" size="sm" className="flex flex-col items-center relative">
-            <AlertTriangle className="w-5 h-5" />
-            <span className="text-xs mt-1">Darurat</span>
-            {notifications.length > 0 && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
-                <span className="text-xs text-white">{notifications.length}</span>
-              </div>
-            )}
-          </Button>
-          
-          <Button variant="ghost" size="sm" className="flex flex-col items-center">
-            <User className="w-5 h-5" />
-            <span className="text-xs mt-1">Profil</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-white shadow-lg border-red-500 text-red-600"
+            onClick={() => handleEmergency('panic')}
+          >
+            <AlertTriangle className="w-4 h-4 mr-1" />
+            Panic
           </Button>
         </div>
-      </div>
+      )}
 
-      {/* Add padding to prevent content from being hidden behind bottom nav */}
-      <div className="h-20"></div>
+      {/* Navigation Button */}
+      {currentOrder && (
+        <div className="fixed bottom-4 left-4">
+          <Button
+            size="lg"
+            className="bg-blue-600 hover:bg-blue-700 shadow-lg"
+            onClick={() => {
+              // In real app, open Google Maps or Waze
+              const destination = currentOrder.status === 'DRIVER_ACCEPTED' || currentOrder.status === 'DRIVER_ARRIVING'
+                ? `${currentOrder.pickupLat},${currentOrder.pickupLng}`
+                : `${currentOrder.dropoffLat},${currentOrder.dropoffLng}`;
+              
+              const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+              window.open(url, '_blank');
+            }}
+          >
+            <Route className="w-5 h-5 mr-2" />
+            Navigate
+          </Button>
+        </div>
+      )}
+
+      {/* CSS for animations */}
+      <style jsx>{`
+        .animate-slide-down {
+          animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .animate-bounce {
+          animation: bounce 0.5s ease-out;
+        }
+        
+        @keyframes bounce {
+          0%, 20%, 53%, 80%, 100% {
+            transform: translateY(0);
+          }
+          40%, 43% {
+            transform: translateY(-10px);
+          }
+          70% {
+            transform: translateY(-5px);
+          }
+        }
+      `}</style>
     </div>
   );
 };

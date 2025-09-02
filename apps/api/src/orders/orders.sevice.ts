@@ -7,7 +7,7 @@ import { OrdersGateway } from './orders.gateway';
 import { PrismaService } from 'src/database/prisma.service';
 
 // Define proper types for the return value
-interface FleetWithDriver {
+export interface FleetWithDriver {
   fleet: {
     id: string;
     vehicleType: VehicleType;
@@ -57,13 +57,15 @@ interface PaginatedResponse<T> {
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
+  private readonly ORDER_ASSIGNMENT_TIMEOUT = 30; // seconds
+  private readonly ORDER_ACCEPTANCE_TIMEOUT = 120; // seconds
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersGateway: OrdersGateway,
   ) {}
 
-  async create(createOrderDto: CreateOrderDto) {
+  async create(createOrderDto: CreateOrderDto, createdBy?: string) {
     // Validate fare calculation consistency
     this.validateFareCalculation(createOrderDto);
 
@@ -78,25 +80,9 @@ export class OrdersService {
       }
     }
 
-    // Find available driver automatically for instant orders
-    let assignedFleet: FleetWithDriver['fleet'] | null = null;
-    let assignedDriver: FleetWithDriver['driver'] | null = null;
-
-    if (!createOrderDto.scheduledAt || createOrderDto.tripType === 'INSTANT') {
-      const availableFleetWithDriver = await this.findAvailableFleetAndDriver(
-        createOrderDto.requestedVehicleType,
-        createOrderDto.pickupCoordinates
-      );
-      
-      if (availableFleetWithDriver) {
-        assignedFleet = availableFleetWithDriver.fleet;
-        assignedDriver = availableFleetWithDriver.driver;
-      }
-    }
-
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        // Create order
+        // Create order with PENDING status first
         const order = await tx.order.create({
           data: {
             orderNumber,
@@ -119,10 +105,10 @@ export class OrdersService {
             airportFare: BigInt(createOrderDto.airportFare || 0),
             totalFare: BigInt(createOrderDto.totalFare),
             paymentMethod: createOrderDto.paymentMethod,
-            status: assignedDriver ? OrderStatus.DRIVER_ASSIGNED : OrderStatus.PENDING,
-            fleetId: assignedFleet?.id || '',
-            driverId: assignedDriver?.id || '',
-            driverAssignedAt: assignedDriver ? new Date() : null,
+            status: OrderStatus.PENDING,
+            // Leave driver and fleet empty initially
+            fleetId: '',
+            driverId: '',
           },
           include: {
             fleet: true,
@@ -149,52 +135,20 @@ export class OrdersService {
           data: {
             orderId: order.id,
             fromStatus: OrderStatus.PENDING,
-            toStatus: order.status,
-            reason: assignedDriver ? 'Order created and driver auto-assigned' : 'Order created',
+            toStatus: OrderStatus.PENDING,
+            reason: 'Order created by operator',
+            changedBy: createdBy,
           },
         });
-
-        // If driver assigned, update driver status
-        if (assignedDriver) {
-          await tx.driverProfile.update({
-            where: { userId: assignedDriver.id },
-            data: {
-              driverStatus: DriverStatus.BUSY,
-              statusChangedAt: new Date(),
-            },
-          });
-
-          // Create driver status history
-          await tx.driverStatusHistory.create({
-            data: {
-              driverId: assignedDriver.driverProfile.id,
-              fromStatus: DriverStatus.ACTIVE,
-              toStatus: DriverStatus.BUSY,
-              reason: 'Assigned to new order',
-              metadata: {
-                orderId: order.id,
-                orderNumber: order.orderNumber,
-              },
-            },
-          });
-        }
 
         return order;
       });
 
-      // Emit real-time events
+      // Emit order created event
       this.ordersGateway.emitOrderCreated(result);
       
-      if (assignedDriver) {
-        this.ordersGateway.emitOrderAssigned(result);
-        this.ordersGateway.emitDriverStatusChanged(assignedDriver.id, DriverStatus.BUSY);
-        
-        // Send notification specifically to assigned driver
-        this.ordersGateway.notifyDriverAssignment(assignedDriver.id, result);
-      } else {
-        // Notify all available drivers about new order
-        this.ordersGateway.notifyAvailableDrivers(result);
-      }
+      // Log order creation
+      this.logger.log(`Order created: ${result.orderNumber} by ${createdBy || 'system'}`);
 
       return this.transformOrderResponse(result);
     } catch (error) {
@@ -211,7 +165,10 @@ export class OrdersService {
   async assignDriver(orderId: string, assignDriverDto: AssignDriverDto, assignedBy?: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { driver: true }
+      include: { 
+        driver: true,
+        fleet: true
+      }
     });
 
     if (!order) {
@@ -222,36 +179,8 @@ export class OrdersService {
       throw new BadRequestException(`Cannot assign driver to order with status: ${order.status}`);
     }
 
-    const driver = await this.prisma.user.findUnique({
-      where: { id: assignDriverDto.driverId },
-      include: { driverProfile: true },
-    });
-
-    if (!driver || !driver.driverProfile) {
-      throw new NotFoundException('Driver not found');
-    }
-
-    if (driver.driverProfile.driverStatus !== DriverStatus.ACTIVE) {
-      throw new BadRequestException(`Driver is not available. Current status: ${driver.driverProfile.driverStatus}`);
-    }
-
-    const fleet = await this.prisma.fleet.findUnique({
-      where: { id: assignDriverDto.fleetId },
-    });
-
-    if (!fleet) {
-      throw new NotFoundException('Fleet not found');
-    }
-
-    if (fleet.status !== 'ACTIVE') {
-      throw new BadRequestException(`Fleet is not available. Current status: ${fleet.status}`);
-    }
-
-    if (fleet.vehicleType !== order.requestedVehicleType) {
-      throw new BadRequestException(
-        `Fleet vehicle type (${fleet.vehicleType}) does not match requested type (${order.requestedVehicleType})`
-      );
-    }
+    // Validate driver availability and permissions
+    await this.validateDriverAssignment(assignDriverDto.driverId, assignDriverDto.fleetId, order.requestedVehicleType);
 
     try {
       const result = await this.prisma.$transaction(async (tx) => {
@@ -283,6 +212,7 @@ export class OrdersService {
           },
         });
 
+        // Update driver status to BUSY
         await tx.driverProfile.update({
           where: { userId: assignDriverDto.driverId },
           data: {
@@ -291,14 +221,30 @@ export class OrdersService {
           },
         });
 
+        // Create status history
         await this.createStatusHistory(
           tx,
           orderId,
           order.status,
           OrderStatus.DRIVER_ASSIGNED,
-          assignDriverDto.reason || 'Driver assigned',
+          assignDriverDto.reason || 'Driver assigned by operator',
           assignedBy
         );
+
+        // Create driver status history
+        await tx.driverStatusHistory.create({
+          data: {
+            driverId: assignDriverDto.driverId,
+            fromStatus: DriverStatus.ACTIVE,
+            toStatus: DriverStatus.BUSY,
+            reason: 'Assigned to new order',
+            changedBy: assignedBy,
+            metadata: {
+              orderId: updatedOrder.id,
+              orderNumber: updatedOrder.orderNumber,
+            },
+          },
+        });
 
         return updatedOrder;
       });
@@ -306,7 +252,14 @@ export class OrdersService {
       // Emit real-time events
       this.ordersGateway.emitOrderAssigned(result);
       this.ordersGateway.emitDriverStatusChanged(assignDriverDto.driverId, DriverStatus.BUSY);
+      
+      // Send notification specifically to assigned driver
       this.ordersGateway.notifyDriverAssignment(assignDriverDto.driverId, result);
+
+      // Set timeout for driver acceptance
+      this.scheduleAcceptanceTimeout(result.id, assignDriverDto.driverId);
+
+      this.logger.log(`Order ${result.orderNumber} assigned to driver ${assignDriverDto.driverId} by ${assignedBy || 'system'}`);
 
       return this.transformOrderResponse(result);
     } catch (error) {
@@ -347,23 +300,40 @@ export class OrdersService {
 
     try {
       const result = await this.prisma.$transaction(async (tx) => {
+        const updateData: any = {
+          status: updateOrderStatusDto.status,
+        };
+
+        // Add timestamp fields based on status
+        switch (updateOrderStatusDto.status) {
+          case OrderStatus.DRIVER_ACCEPTED:
+            updateData.driverAcceptedAt = new Date();
+            break;
+          case OrderStatus.DRIVER_ARRIVING:
+            updateData.driverArrivedAt = new Date();
+            break;
+          case OrderStatus.IN_PROGRESS:
+            updateData.tripStartedAt = new Date();
+            break;
+          case OrderStatus.COMPLETED:
+            updateData.tripCompletedAt = new Date();
+            if (order.tripStartedAt) {
+              updateData.actualDurationMinutes = Math.round(
+                (new Date().getTime() - order.tripStartedAt.getTime()) / 60000
+              );
+            }
+            break;
+        }
+
+        // Handle cancellation fields
+        if (updateOrderStatusDto.status.startsWith('CANCELLED')) {
+          updateData.cancelledAt = new Date();
+          updateData.cancelledReason = updateOrderStatusDto.reason;
+        }
+
         const updatedOrder = await tx.order.update({
           where: { id: orderId },
-          data: {
-            status: updateOrderStatusDto.status,
-            ...(updateOrderStatusDto.status === OrderStatus.DRIVER_ACCEPTED && { driverAcceptedAt: new Date() }),
-            ...(updateOrderStatusDto.status === OrderStatus.DRIVER_ARRIVING && { driverArrivedAt: new Date() }),
-            ...(updateOrderStatusDto.status === OrderStatus.IN_PROGRESS && { tripStartedAt: new Date() }),
-            ...(updateOrderStatusDto.status === OrderStatus.COMPLETED && { 
-              tripCompletedAt: new Date(),
-              actualDurationMinutes: order.tripStartedAt ? 
-                Math.round((new Date().getTime() - order.tripStartedAt.getTime()) / 60000) : null
-            }),
-            ...(updateOrderStatusDto.status.startsWith('CANCELLED') && { 
-              cancelledAt: new Date(),
-              cancelledReason: updateOrderStatusDto.reason
-            }),
-          },
+          data: updateData,
           include: {
             fleet: true,
             driver: {
@@ -398,36 +368,47 @@ export class OrdersService {
         // Update driver status based on order status
         if (order.driver?.driverProfile) {
           let newDriverStatus: DriverStatus | null = null;
+          let statusChangeReason = '';
           
-          if (updateOrderStatusDto.status === OrderStatus.COMPLETED || 
-              updateOrderStatusDto.status.startsWith('CANCELLED')) {
+          if (updateOrderStatusDto.status === OrderStatus.COMPLETED) {
             newDriverStatus = DriverStatus.ACTIVE;
-          }
-
-          if (newDriverStatus) {
+            statusChangeReason = 'Trip completed successfully';
+            
+            // Update driver statistics
             await tx.driverProfile.update({
               where: { userId: order.driverId },
               data: {
                 driverStatus: newDriverStatus,
                 statusChangedAt: new Date(),
-                ...(updateOrderStatusDto.status === OrderStatus.COMPLETED && {
-                  completedTrips: { increment: 1 },
-                  totalTrips: { increment: 1 }
-                }),
-                ...(updateOrderStatusDto.status.startsWith('CANCELLED') && {
-                  cancelledTrips: { increment: 1 },
-                  totalTrips: { increment: 1 }
-                })
+                completedTrips: { increment: 1 },
+                totalTrips: { increment: 1 },
               },
             });
+          } else if (updateOrderStatusDto.status.startsWith('CANCELLED')) {
+            newDriverStatus = DriverStatus.ACTIVE;
+            statusChangeReason = `Trip cancelled: ${updateOrderStatusDto.reason || 'Unknown reason'}`;
+            
+            // Update driver statistics
+            await tx.driverProfile.update({
+              where: { userId: order.driverId },
+              data: {
+                driverStatus: newDriverStatus,
+                statusChangedAt: new Date(),
+                cancelledTrips: { increment: 1 },
+                totalTrips: { increment: 1 },
+              },
+            });
+          }
 
+          if (newDriverStatus) {
             // Create driver status history
             await tx.driverStatusHistory.create({
               data: {
                 driverId: order.driver.driverProfile.id,
                 fromStatus: DriverStatus.BUSY,
                 toStatus: newDriverStatus,
-                reason: `Order ${updateOrderStatusDto.status.toLowerCase()}`,
+                reason: statusChangeReason,
+                changedBy: userId,
                 metadata: {
                   orderId: order.id,
                   orderNumber: order.orderNumber,
@@ -449,6 +430,8 @@ export class OrdersService {
         this.ordersGateway.emitDriverStatusChanged(order.driverId, DriverStatus.ACTIVE);
       }
 
+      this.logger.log(`Order ${result.orderNumber} status updated to ${updateOrderStatusDto.status} by ${userId || 'system'}`);
+
       return this.transformOrderResponse(result);
     } catch (error) {
       this.logger.error('Failed to update order status', error);
@@ -456,6 +439,222 @@ export class OrdersService {
     }
   }
 
+  // Enhanced method to find available drivers
+  async findAvailableDrivers(
+    vehicleType: VehicleType, 
+    pickupCoordinates: { lat: number; lng: number },
+    radiusKm: number = 10
+  ): Promise<FleetWithDriver[]> {
+    const availableFleetWithDrivers = await this.prisma.fleet.findMany({
+      where: {
+        vehicleType: vehicleType,
+        status: 'ACTIVE',
+        assignments: {
+          some: {
+            isActive: true,
+            driver: {
+              driverProfile: {
+                driverStatus: 'ACTIVE',
+                isVerified: true,
+                currentLat: { not: null },
+                currentLng: { not: null },
+              }
+            }
+          }
+        }
+      },
+      include: {
+        assignments: {
+          where: { isActive: true },
+          include: {
+            driver: {
+              include: {
+                driverProfile: true
+              }
+            }
+          }
+        }
+      },
+      take: 20, // Limit initial results
+    });
+
+    const eligibleDrivers: FleetWithDriver[] = [];
+
+    for (const fleet of availableFleetWithDrivers) {
+      if (!fleet.assignments.length || !fleet.assignments[0].driver?.driverProfile) {
+        continue;
+      }
+
+      const assignment = fleet.assignments[0];
+      const driver = assignment.driver;
+      const profile = driver.driverProfile;
+
+      // Calculate distance if coordinates are available
+      if (profile && profile.currentLat != null && profile.currentLng != null) {
+        const distance = this.calculateDistance(
+          pickupCoordinates.lat,
+          pickupCoordinates.lng,
+          profile.currentLat,
+          profile.currentLng
+        );
+
+        if (distance <= radiusKm) {
+          eligibleDrivers.push({
+            fleet: {
+              id: fleet.id,
+              vehicleType: fleet.vehicleType,
+              status: fleet.status,
+              plateNumber: fleet.plateNumber,
+              brand: fleet.brand,
+              model: fleet.model,
+              color: fleet.color,
+            },
+            driver: {
+              id: driver.id,
+              name: driver.name,
+              phone: driver.phone,
+              driverProfile: {
+                id: profile.id,
+                rating: profile.rating || 0,
+                driverStatus: profile.driverStatus,
+                currentLat: profile.currentLat,
+                currentLng: profile.currentLng,
+                isVerified: profile.isVerified,
+                totalTrips: profile.totalTrips,
+                completedTrips: profile.completedTrips,
+              }
+            }
+          });
+        }
+      }
+    }
+
+    // Sort by distance and rating
+    return eligibleDrivers.sort((a, b) => {
+      const distanceA = this.calculateDistance(
+        pickupCoordinates.lat,
+        pickupCoordinates.lng,
+        a.driver.driverProfile.currentLat!,
+        a.driver.driverProfile.currentLng!
+      );
+      const distanceB = this.calculateDistance(
+        pickupCoordinates.lat,
+        pickupCoordinates.lng,
+        b.driver.driverProfile.currentLat!,
+        b.driver.driverProfile.currentLng!
+      );
+
+      // Primary sort by distance, secondary by rating
+      if (Math.abs(distanceA - distanceB) < 1) { // If distances are similar (within 1km)
+        return b.driver.driverProfile.rating - a.driver.driverProfile.rating;
+      }
+      return distanceA - distanceB;
+    });
+  }
+
+  // Helper method to validate driver assignment
+  private async validateDriverAssignment(
+    driverId: string, 
+    fleetId: string, 
+    requiredVehicleType: VehicleType
+  ): Promise<void> {
+    const driver = await this.prisma.user.findUnique({
+      where: { id: driverId },
+      include: { driverProfile: true },
+    });
+
+    if (!driver || !driver.driverProfile) {
+      throw new NotFoundException('Driver not found');
+    }
+
+    if (driver.driverProfile.driverStatus !== DriverStatus.ACTIVE) {
+      throw new BadRequestException(
+        `Driver is not available. Current status: ${driver.driverProfile.driverStatus}`
+      );
+    }
+
+    if (!driver.driverProfile.isVerified) {
+      throw new BadRequestException('Driver is not verified');
+    }
+
+    const fleet = await this.prisma.fleet.findUnique({
+      where: { id: fleetId },
+      include: {
+        assignments: {
+          where: {
+            driverId: driverId,
+            isActive: true,
+          }
+        }
+      }
+    });
+
+    if (!fleet) {
+      throw new NotFoundException('Fleet not found');
+    }
+
+    if (fleet.status !== 'ACTIVE') {
+      throw new BadRequestException(`Fleet is not available. Current status: ${fleet.status}`);
+    }
+
+    if (fleet.vehicleType !== requiredVehicleType) {
+      throw new BadRequestException(
+        `Fleet vehicle type (${fleet.vehicleType}) does not match requested type (${requiredVehicleType})`
+      );
+    }
+
+    if (!fleet.assignments.length) {
+      throw new BadRequestException('Driver is not assigned to this fleet');
+    }
+  }
+
+  // Method to handle acceptance timeout
+  private scheduleAcceptanceTimeout(orderId: string, driverId: string) {
+    setTimeout(async () => {
+      try {
+        const order = await this.prisma.order.findUnique({
+          where: { id: orderId },
+        });
+
+        // Check if order is still in DRIVER_ASSIGNED status
+        if (order && order.status === OrderStatus.DRIVER_ASSIGNED) {
+          this.logger.warn(`Driver ${driverId} did not accept order ${order.orderNumber} within timeout`);
+          
+          // Update order status to expired and make driver available
+          await this.updateStatus(orderId, {
+            status: OrderStatus.EXPIRED,
+            reason: 'Driver did not accept within time limit',
+          }, 'system');
+
+          // Optionally, try to reassign to another driver
+          // await this.findAndAssignNextDriver(orderId);
+        }
+      } catch (error) {
+        this.logger.error(`Error handling acceptance timeout for order ${orderId}:`, error);
+      }
+    }, this.ORDER_ACCEPTANCE_TIMEOUT * 1000);
+  }
+
+  // Utility method to calculate distance between two points
+  private calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = this.degreesToRadians(lat2 - lat1);
+    const dLng = this.degreesToRadians(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.degreesToRadians(lat1)) *
+        Math.cos(this.degreesToRadians(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  private degreesToRadians(degrees: number): number {
+    return degrees * (Math.PI / 180);
+  }
+
+  // Keep all existing methods...
   async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
     const { status, driverId, customerId, dateFrom, dateTo, page = 1, limit = 10 } = filters;
 
@@ -557,84 +756,6 @@ export class OrdersService {
     return this.transformOrderResponse(order);
   }
 
-  // Helper method to find available fleet and driver
-  private async findAvailableFleetAndDriver(
-    vehicleType: VehicleType, 
-    pickupCoordinates: { lat: number; lng: number }
-  ): Promise<FleetWithDriver | null> {
-    const availableFleetWithDriver = await this.prisma.fleet.findFirst({
-      where: {
-        vehicleType: vehicleType,
-        status: 'ACTIVE',
-        assignments: {
-          some: {
-            isActive: true,
-            driver: {
-              driverProfile: {
-                driverStatus: 'ACTIVE',
-                isVerified: true,
-              }
-            }
-          }
-        }
-      },
-      include: {
-        assignments: {
-          where: { isActive: true },
-          include: {
-            driver: {
-              include: {
-                driverProfile: true
-              }
-            }
-          }
-        }
-      },
-      // TODO: Add distance-based ordering using PostGIS or similar
-    });
-
-    if (!availableFleetWithDriver || 
-        !availableFleetWithDriver.assignments.length || 
-        !availableFleetWithDriver.assignments[0].driver?.driverProfile) {
-      return null;
-    }
-
-    const assignment = availableFleetWithDriver.assignments[0];
-    const driver = assignment.driver;
-
-    // Ensure driver profile exists before proceeding
-    if (!driver.driverProfile) {
-      return null;
-    }
-
-    return {
-      fleet: {
-        id: availableFleetWithDriver.id,
-        vehicleType: availableFleetWithDriver.vehicleType,
-        status: availableFleetWithDriver.status,
-        plateNumber: availableFleetWithDriver.plateNumber,
-        brand: availableFleetWithDriver.brand,
-        model: availableFleetWithDriver.model,
-        color: availableFleetWithDriver.color,
-      },
-      driver: {
-        id: driver.id,
-        name: driver.name,
-        phone: driver.phone,
-        driverProfile: {
-          id: driver.driverProfile.id,
-          rating: driver.driverProfile.rating || 0,
-          driverStatus: driver.driverProfile.driverStatus,
-          currentLat: driver.driverProfile.currentLat,
-          currentLng: driver.driverProfile.currentLng,
-          isVerified: driver.driverProfile.isVerified,
-          totalTrips: driver.driverProfile.totalTrips,
-          completedTrips: driver.driverProfile.completedTrips,
-        }
-      }
-    };
-  }
-
   private getValidStatusTransitions(currentStatus: OrderStatus): OrderStatus[] {
     const transitions: Record<OrderStatus, OrderStatus[]> = {
       [OrderStatus.PENDING]: [OrderStatus.DRIVER_ASSIGNED, OrderStatus.NO_DRIVER_AVAILABLE, OrderStatus.CANCELLED_BY_SYSTEM],
@@ -646,7 +767,7 @@ export class OrdersService {
       [OrderStatus.CANCELLED_BY_CUSTOMER]: [],
       [OrderStatus.CANCELLED_BY_DRIVER]: [],
       [OrderStatus.CANCELLED_BY_SYSTEM]: [],
-      [OrderStatus.EXPIRED]: [],
+      [OrderStatus.EXPIRED]: [OrderStatus.DRIVER_ASSIGNED], // Allow reassignment
       [OrderStatus.NO_DRIVER_AVAILABLE]: [OrderStatus.DRIVER_ASSIGNED, OrderStatus.CANCELLED_BY_SYSTEM],
     };
 

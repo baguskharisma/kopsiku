@@ -26,9 +26,14 @@ interface DriverSocket {
   location?: {
     lat: number;
     lng: number;
+    accuracy?: number;
+    heading?: number;
+    speed?: number;
   };
   vehicleType?: VehicleType;
   lastLocationUpdate?: Date;
+  lastActivity?: Date;
+  currentOrderId?: string;
 }
 
 interface OrderAssignmentData {
@@ -47,11 +52,17 @@ interface OrderAssignmentData {
   vehicleType: VehicleType;
   specialRequests?: string;
   distanceKm?: number;
+  fleetInfo?: {
+    plateNumber: string;
+    brand: string;
+    model: string;
+    color: string;
+  };
 }
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || '*',
     credentials: true,
   },
   namespace: '/orders',
@@ -59,36 +70,62 @@ interface OrderAssignmentData {
 export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer() server: Server;
   private logger = new Logger('OrdersGateway');
+  
+  // Connection maps
   private driverSockets = new Map<string, DriverSocket>(); // driverId -> socket info
   private operatorSockets = new Set<AuthenticatedSocket>(); // operator/admin sockets
+  private orderTimeouts = new Map<string, NodeJS.Timeout>(); // orderId -> timeout
+
+  // Constants
+  private readonly ACCEPTANCE_TIMEOUT = 120; // seconds
+  private readonly HEARTBEAT_INTERVAL = 30; // seconds
+  private readonly LOCATION_UPDATE_INTERVAL = 10; // seconds
 
   constructor(private readonly jwtService: JwtService) {}
 
   afterInit(server: Server) {
     this.logger.log('WebSocket Gateway initialized');
+    this.startHeartbeat();
   }
 
   async handleConnection(client: AuthenticatedSocket) {
-    this.logger.log(`Client connected: ${client.id}`);
+    this.logger.log(`Client attempting connection: ${client.id}`);
     
     try {
       // Extract token from auth header or query
-      const token = client.handshake.auth?.token || client.handshake.query?.token;
+      const token = client.handshake.auth?.token || 
+                   client.handshake.query?.token ||
+                   client.handshake.headers?.authorization?.replace('Bearer ', '');
       
-      if (token) {
-        const payload = this.jwtService.verify(token);
-        client.userId = payload.sub;
-        client.userRole = payload.role;
-        
-        if (payload.role === 'DRIVER') {
+      if (!token) {
+        this.logger.warn(`No token provided for client ${client.id}`);
+        client.emit('error', { message: 'Authentication token required' });
+        client.disconnect(true);
+        return;
+      }
+
+      const payload = this.jwtService.verify(token);
+      client.userId = payload.sub;
+      client.userRole = payload.role;
+      
+      // Handle different user types
+      switch (payload.role) {
+        case 'DRIVER':
           client.driverId = payload.sub;
           await this.handleDriverConnection(client);
-        } else if (payload.role === 'ADMIN' || payload.role === 'SUPER_ADMIN') {
+          break;
+        case 'ADMIN':
+        case 'SUPER_ADMIN':
           await this.handleOperatorConnection(client);
-        }
+          break;
+        default:
+          this.logger.warn(`Unsupported role: ${payload.role}`);
+          client.emit('error', { message: 'Unsupported user role' });
+          client.disconnect(true);
       }
     } catch (error) {
       this.logger.warn(`Authentication failed for client ${client.id}: ${error.message}`);
+      client.emit('error', { message: 'Invalid authentication token' });
       client.disconnect(true);
     }
   }
@@ -115,6 +152,8 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.operatorSockets.delete(client);
   }
 
+  // CONNECTION HANDLERS
+
   private async handleDriverConnection(client: AuthenticatedSocket) {
     if (!client.driverId) return;
 
@@ -122,10 +161,13 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       socket: client,
       driverId: client.driverId,
       isActive: true,
+      lastActivity: new Date(),
     });
     
     client.join(`driver:${client.driverId}`);
-    this.logger.log(`Driver ${client.driverId} authenticated and joined room`);
+    client.join('drivers'); // General drivers room
+    
+    this.logger.log(`Driver ${client.driverId} authenticated and joined rooms`);
     
     // Notify operators about new driver online
     this.server.to('operators').emit('driver:connected', {
@@ -133,11 +175,14 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       timestamp: new Date().toISOString(),
     });
 
-    // Send welcome message with current stats
+    // Send welcome message with system status
     client.emit('driver:welcome', {
-      message: 'Connected to KOPSI system',
+      message: 'Successfully connected to KOPSI system',
       timestamp: new Date().toISOString(),
-      onlineDrivers: this.driverSockets.size,
+      systemStatus: {
+        onlineDrivers: this.driverSockets.size,
+        serverTime: new Date().toISOString(),
+      },
     });
   }
 
@@ -150,38 +195,56 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     client.emit('system:status', {
       connectedDrivers: this.driverSockets.size,
       connectedOperators: this.operatorSockets.size,
+      activeOrders: this.getActiveOrdersCount(),
       timestamp: new Date().toISOString(),
     });
   }
 
+  // DRIVER MESSAGE HANDLERS
+
   @SubscribeMessage('driver:location_update')
   async handleDriverLocationUpdate(
-    @MessageBody() data: { lat: number; lng: number; accuracy?: number },
+    @MessageBody() data: { 
+      lat: number; 
+      lng: number; 
+      accuracy?: number;
+      heading?: number;
+      speed?: number;
+    },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
-    if (!client.driverId) return;
+    if (!client.driverId) {
+      client.emit('error', { message: 'Driver ID not found' });
+      return;
+    }
 
     const driverSocket = this.driverSockets.get(client.driverId);
-    if (!driverSocket) return;
+    if (!driverSocket) {
+      client.emit('error', { message: 'Driver session not found' });
+      return;
+    }
 
-    // Update driver location
-    driverSocket.location = { lat: data.lat, lng: data.lng };
-    driverSocket.lastLocationUpdate = new Date();
-    
     // Validate location data
     if (data.lat < -90 || data.lat > 90 || data.lng < -180 || data.lng > 180) {
       client.emit('error', { message: 'Invalid location coordinates' });
       return;
     }
 
+    // Update driver location
+    driverSocket.location = {
+      lat: data.lat,
+      lng: data.lng,
+      accuracy: data.accuracy,
+      heading: data.heading,
+      speed: data.speed,
+    };
+    driverSocket.lastLocationUpdate = new Date();
+    driverSocket.lastActivity = new Date();
+    
     // Broadcast location update to operators
     this.server.to('operators').emit('driver:location_updated', {
       driverId: client.driverId,
-      location: {
-        lat: data.lat,
-        lng: data.lng,
-        accuracy: data.accuracy || null,
-      },
+      location: driverSocket.location,
       timestamp: new Date().toISOString(),
     });
 
@@ -194,7 +257,7 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
   @SubscribeMessage('driver:status_change')
   async handleDriverStatusChange(
-    @MessageBody() data: { status: DriverStatus },
+    @MessageBody() data: { status: DriverStatus; currentOrderId?: string },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     if (!client.driverId) return;
@@ -202,12 +265,17 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     const driverSocket = this.driverSockets.get(client.driverId);
     if (!driverSocket) return;
 
+    const previousStatus = driverSocket.isActive;
     driverSocket.isActive = data.status === DriverStatus.ACTIVE;
+    driverSocket.lastActivity = new Date();
+    driverSocket.currentOrderId = data.currentOrderId;
     
-    // Notify operators
+    // Notify operators about status change
     this.server.to('operators').emit('driver:status_changed', {
       driverId: client.driverId,
       status: data.status,
+      previousStatus: previousStatus ? DriverStatus.ACTIVE : DriverStatus.OFFLINE,
+      currentOrderId: data.currentOrderId,
       timestamp: new Date().toISOString(),
     });
 
@@ -217,100 +285,164 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       status: data.status,
       timestamp: new Date().toISOString(),
     });
+
+    this.logger.log(`Driver ${client.driverId} status changed to ${data.status}`);
   }
 
-  @SubscribeMessage('driver:accept_order')
-  async handleDriverAcceptOrder(
-    @MessageBody() data: { orderId: string; estimatedArrival?: number },
-    @ConnectedSocket() client: AuthenticatedSocket,
-  ) {
-    if (!client.driverId) return;
-
-    const acceptanceData = {
-      orderId: data.orderId,
-      driverId: client.driverId,
-      estimatedArrival: data.estimatedArrival || 5,
-      acceptedAt: new Date().toISOString(),
-    };
-
-    // Notify operators
-    this.server.to('operators').emit('order:driver_accepted', acceptanceData);
-    
-    // Acknowledge acceptance
-    client.emit('order:acceptance_confirmed', {
-      success: true,
-      orderId: data.orderId,
-      message: 'Order accepted successfully',
-      timestamp: new Date().toISOString(),
-    });
-
-    this.logger.log(`Driver ${client.driverId} accepted order ${data.orderId}`);
-  }
-
-  @SubscribeMessage('driver:reject_order')
-  async handleDriverRejectOrder(
-    @MessageBody() data: { orderId: string; reason?: string },
-    @ConnectedSocket() client: AuthenticatedSocket,
-  ) {
-    if (!client.driverId) return;
-
-    const rejectionData = {
-      orderId: data.orderId,
-      driverId: client.driverId,
-      reason: data.reason || 'No reason provided',
-      rejectedAt: new Date().toISOString(),
-    };
-
-    // Notify operators
-    this.server.to('operators').emit('order:driver_rejected', rejectionData);
-    
-    // Acknowledge rejection
-    client.emit('order:rejection_confirmed', {
-      success: true,
-      orderId: data.orderId,
-      message: 'Order rejection recorded',
-      timestamp: new Date().toISOString(),
-    });
-
-    this.logger.log(`Driver ${client.driverId} rejected order ${data.orderId}: ${data.reason}`);
-  }
-
-  @SubscribeMessage('driver:update_trip_status')
-  async handleDriverUpdateTripStatus(
+  @SubscribeMessage('driver:order_response')
+  async handleDriverOrderResponse(
     @MessageBody() data: { 
       orderId: string; 
-      status: 'arrived' | 'started' | 'completed';
+      action: 'accept' | 'reject'; 
+      reason?: string;
+      estimatedArrival?: number;
       location?: { lat: number; lng: number };
     },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     if (!client.driverId) return;
 
-    const statusData = {
+    const driverSocket = this.driverSockets.get(client.driverId);
+    if (!driverSocket) return;
+
+    driverSocket.lastActivity = new Date();
+
+    // Clear any existing timeout for this order
+    const timeout = this.orderTimeouts.get(data.orderId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.orderTimeouts.delete(data.orderId);
+    }
+
+    const responseData = {
+      orderId: data.orderId,
+      driverId: client.driverId,
+      action: data.action,
+      reason: data.reason,
+      estimatedArrival: data.estimatedArrival,
+      location: data.location,
+      respondedAt: new Date().toISOString(),
+    };
+
+    if (data.action === 'accept') {
+      // Update current order
+      driverSocket.currentOrderId = data.orderId;
+      
+      // Notify operators
+      this.server.to('operators').emit('order:driver_accepted', responseData);
+      
+      // Acknowledge acceptance
+      client.emit('order:response_acknowledged', {
+        success: true,
+        orderId: data.orderId,
+        action: 'accepted',
+        message: 'Order accepted successfully',
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      // Notify operators about rejection
+      this.server.to('operators').emit('order:driver_rejected', responseData);
+      
+      // Acknowledge rejection
+      client.emit('order:response_acknowledged', {
+        success: true,
+        orderId: data.orderId,
+        action: 'rejected',
+        message: 'Order rejection recorded',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    this.logger.log(`Driver ${client.driverId} ${data.action}ed order ${data.orderId}`);
+  }
+
+  @SubscribeMessage('driver:trip_update')
+  async handleDriverTripUpdate(
+    @MessageBody() data: { 
+      orderId: string; 
+      status: 'arriving' | 'arrived' | 'started' | 'completed';
+      location?: { lat: number; lng: number };
+      notes?: string;
+      odometerReading?: number;
+    },
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    if (!client.driverId) return;
+
+    const driverSocket = this.driverSockets.get(client.driverId);
+    if (!driverSocket) return;
+
+    driverSocket.lastActivity = new Date();
+
+    const updateData = {
       orderId: data.orderId,
       driverId: client.driverId,
       status: data.status,
       location: data.location,
+      notes: data.notes,
+      odometerReading: data.odometerReading,
       timestamp: new Date().toISOString(),
     };
 
+    // Update current order status
+    if (data.status === 'completed') {
+      driverSocket.currentOrderId = undefined;
+    }
+
     // Notify operators
-    this.server.to('operators').emit('order:trip_status_updated', statusData);
+    this.server.to('operators').emit('order:trip_updated', updateData);
     
-    // Acknowledge status update
-    client.emit('order:status_update_confirmed', {
+    // Acknowledge update
+    client.emit('trip:update_acknowledged', {
       success: true,
       orderId: data.orderId,
       status: data.status,
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Driver ${client.driverId} updated trip status for order ${data.orderId}: ${data.status}`);
+    this.logger.log(`Driver ${client.driverId} updated trip ${data.orderId}: ${data.status}`);
   }
 
-  @SubscribeMessage('get_active_drivers')
+  @SubscribeMessage('driver:emergency')
+  async handleDriverEmergency(
+    @MessageBody() data: { 
+      type: 'panic' | 'accident' | 'breakdown' | 'medical'; 
+      location?: { lat: number; lng: number };
+      message?: string;
+      orderId?: string;
+    },
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    if (!client.driverId) return;
+
+    const emergencyData = {
+      driverId: client.driverId,
+      type: data.type,
+      location: data.location,
+      message: data.message,
+      orderId: data.orderId,
+      timestamp: new Date().toISOString(),
+      priority: 'EMERGENCY',
+    };
+
+    // Broadcast emergency to all operators with high priority
+    this.server.to('operators').emit('emergency:driver_alert', emergencyData);
+    
+    // Log emergency
+    this.logger.error(`EMERGENCY: Driver ${client.driverId} reported ${data.type}`);
+    
+    // Acknowledge emergency
+    client.emit('emergency:acknowledged', {
+      success: true,
+      message: 'Emergency alert sent to control center',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // OPERATOR MESSAGE HANDLERS
+
+  @SubscribeMessage('operator:get_drivers')
   handleGetActiveDrivers(@ConnectedSocket() client: AuthenticatedSocket) {
-    // Only allow operators to get driver list
     if (client.userRole !== 'ADMIN' && client.userRole !== 'SUPER_ADMIN') {
       client.emit('error', { message: 'Unauthorized access' });
       return;
@@ -324,9 +456,11 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         vehicleType: driverSocket.vehicleType,
         isOnline: true,
         lastLocationUpdate: driverSocket.lastLocationUpdate,
+        lastActivity: driverSocket.lastActivity,
+        currentOrderId: driverSocket.currentOrderId,
       }));
 
-    client.emit('active_drivers_list', {
+    client.emit('drivers:list', {
       drivers: activeDrivers,
       count: activeDrivers.length,
       timestamp: new Date().toISOString(),
@@ -338,11 +472,11 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     @MessageBody() data: { 
       message: string; 
       targetDrivers?: string[]; 
-      priority?: 'low' | 'medium' | 'high' 
+      priority?: 'low' | 'medium' | 'high';
+      type?: 'info' | 'warning' | 'alert';
     },
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
-    // Only allow operators to broadcast
     if (client.userRole !== 'ADMIN' && client.userRole !== 'SUPER_ADMIN') {
       client.emit('error', { message: 'Unauthorized access' });
       return;
@@ -351,39 +485,48 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     const broadcastData = {
       message: data.message,
       priority: data.priority || 'medium',
-      from: 'operator',
+      type: data.type || 'info',
+      from: 'control_center',
+      operatorId: client.userId,
       timestamp: new Date().toISOString(),
     };
+
+    let targetCount = 0;
 
     if (data.targetDrivers && data.targetDrivers.length > 0) {
       // Send to specific drivers
       data.targetDrivers.forEach(driverId => {
-        this.server.to(`driver:${driverId}`).emit('operator:message', broadcastData);
+        if (this.driverSockets.has(driverId)) {
+          this.server.to(`driver:${driverId}`).emit('operator:message', broadcastData);
+          targetCount++;
+        }
       });
     } else {
       // Broadcast to all connected drivers
-      this.driverSockets.forEach((_, driverId) => {
-        this.server.to(`driver:${driverId}`).emit('operator:message', broadcastData);
-      });
+      this.server.to('drivers').emit('operator:message', broadcastData);
+      targetCount = this.driverSockets.size;
     }
 
     client.emit('broadcast:confirmed', {
       success: true,
-      targetCount: data.targetDrivers ? data.targetDrivers.length : this.driverSockets.size,
+      targetCount,
       timestamp: new Date().toISOString(),
     });
+
+    this.logger.log(`Operator ${client.userId} broadcast message to ${targetCount} drivers`);
   }
 
-  // Order events - called from OrdersService
+  // ORDER EVENT METHODS (Called from OrdersService)
+
   emitOrderCreated(order: any) {
     const orderData = {
       event: 'order.created',
-      data: order,
+      data: this.transformOrderForEmit(order),
       timestamp: new Date().toISOString(),
     };
 
     // Notify operators
-    this.server.to('operators').emit('order.created', orderData);
+    this.server.to('operators').emit('order:created', orderData);
     
     this.logger.log(`Order created event emitted: ${order.orderNumber}`);
   }
@@ -391,43 +534,30 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   emitOrderAssigned(order: any) {
     const orderData = {
       event: 'order.assigned',
-      data: order,
+      data: this.transformOrderForEmit(order),
       timestamp: new Date().toISOString(),
     };
 
     // Notify operators
-    this.server.to('operators').emit('order.assigned', orderData);
+    this.server.to('operators').emit('order:assigned', orderData);
 
-    // Notify specific driver
-    if (order.driverId) {
-      this.server.to(`driver:${order.driverId}`).emit('order.assignment', orderData);
+    // Notify specific driver if they're connected
+    if (order.driverId && this.driverSockets.has(order.driverId)) {
+      this.server.to(`driver:${order.driverId}`).emit('order:assignment', orderData);
     }
 
-    this.logger.log(`Order assigned event emitted: ${order.orderNumber} -> ${order.driver?.name}`);
+    this.logger.log(`Order assigned event emitted: ${order.orderNumber} -> Driver ${order.driverId}`);
   }
 
   emitOrderStatusUpdated(order: any) {
     const orderData = {
       event: 'order.status.updated',
-      data: order,
+      data: this.transformOrderForEmit(order),
       timestamp: new Date().toISOString(),
     };
 
     // Notify everyone
-    this.server.emit('order.status.updated', orderData);
-
-    // Specific notification to operators
-    this.server.to('operators').emit('order.status.changed', {
-      event: 'order.status.changed',
-      data: {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        status: order.status,
-        driverId: order.driverId,
-        driverName: order.driver?.name,
-      },
-      timestamp: new Date().toISOString(),
-    });
+    this.server.emit('order:status_updated', orderData);
 
     this.logger.log(`Order status updated: ${order.orderNumber} -> ${order.status}`);
   }
@@ -446,17 +576,24 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     const driverSocket = this.driverSockets.get(driverId);
     if (driverSocket) {
       driverSocket.isActive = status === DriverStatus.ACTIVE;
+      driverSocket.lastActivity = new Date();
     }
 
     // Notify operators and the driver
-    this.server.to('operators').emit('driver.status.changed', statusData);
-    this.server.to(`driver:${driverId}`).emit('driver.status.updated', statusData);
+    this.server.to('operators').emit('driver:status_changed', statusData);
+    this.server.to(`driver:${driverId}`).emit('driver:status_updated', statusData);
 
     this.logger.log(`Driver status changed: ${driverId} -> ${status}`);
   }
 
   // Enhanced driver notification methods
   notifyDriverAssignment(driverId: string, order: any) {
+    const driverSocket = this.driverSockets.get(driverId);
+    if (!driverSocket) {
+      this.logger.warn(`Cannot notify driver ${driverId} - not connected`);
+      return;
+    }
+
     const notificationData: OrderAssignmentData = {
       orderId: order.id,
       orderNumber: order.orderNumber,
@@ -473,28 +610,36 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       vehicleType: order.requestedVehicleType,
       specialRequests: order.specialRequests,
       distanceKm: order.distanceMeters ? order.distanceMeters / 1000 : undefined,
+      fleetInfo: order.fleet ? {
+        plateNumber: order.fleet.plateNumber,
+        brand: order.fleet.brand,
+        model: order.fleet.model,
+        color: order.fleet.color,
+      } : undefined,
     };
 
-    const fullNotification = {
+    // Send detailed order assignment
+    driverSocket.socket.emit('order:new_assignment', {
       event: 'new_order_assignment',
       data: notificationData,
+      timeout: this.ACCEPTANCE_TIMEOUT,
       timestamp: new Date().toISOString(),
-    };
-
-    // Send to specific driver
-    this.server.to(`driver:${driverId}`).emit('order.new_assignment', fullNotification);
+    });
     
     // Also send push-style notification
-    this.server.to(`driver:${driverId}`).emit('notification', {
+    driverSocket.socket.emit('notification', {
       type: 'order_assignment',
       title: 'New Trip Assignment',
-      message: `You have been assigned a trip from ${order.pickupAddress} to ${order.dropoffAddress}`,
+      message: `Trip from ${order.pickupAddress.substring(0, 30)}... to ${order.dropoffAddress.substring(0, 30)}...`,
       priority: 'high',
       data: notificationData,
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Driver assignment notification sent to: ${driverId}`);
+    // Set timeout for acceptance
+    this.setOrderTimeout(order.id, driverId);
+
+    this.logger.log(`Driver assignment notification sent to: ${driverId} for order: ${order.orderNumber}`);
   }
 
   notifyAvailableDrivers(order: any, radius: number = 5) {
@@ -512,55 +657,94 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           lng: order.pickupLng,
         },
         distanceKm: order.distanceMeters ? order.distanceMeters / 1000 : undefined,
-        specialRequests: order.specialRequests,
       },
       timestamp: new Date().toISOString(),
     };
 
     // Filter drivers by vehicle type and proximity
-    const eligibleDrivers = Array.from(this.driverSockets.entries())
-      .filter(([_, driverSocket]) => {
-        if (!driverSocket.isActive || !driverSocket.location) return false;
-        
-        // Check vehicle type compatibility
-        if (driverSocket.vehicleType && driverSocket.vehicleType !== order.requestedVehicleType) {
-          return false;
-        }
-
-        // Check proximity (simple distance calculation)
-        const distance = this.calculateDistance(
-          driverSocket.location.lat,
-          driverSocket.location.lng,
-          order.pickupLat,
-          order.pickupLng
-        );
-        
-        return distance <= radius;
-      });
+    const eligibleDrivers = this.getEligibleDrivers(
+      order.requestedVehicleType,
+      { lat: order.pickupLat, lng: order.pickupLng },
+      radius
+    );
 
     // Notify eligible drivers
-    eligibleDrivers.forEach(([driverId, driverSocket]) => {
-      driverSocket.socket.emit('order.available', notificationData);
+    eligibleDrivers.forEach(driverId => {
+      this.server.to(`driver:${driverId}`).emit('order:available', notificationData);
     });
 
     this.logger.log(`New order broadcast to ${eligibleDrivers.length} eligible drivers: ${order.orderNumber}`);
   }
 
-  // Utility methods
-  getConnectedDriversCount(): number {
-    return Array.from(this.driverSockets.values()).filter(d => d.isActive).length;
+  // UTILITY METHODS
+
+  private startHeartbeat() {
+    setInterval(() => {
+      // Check for inactive drivers
+      const now = new Date();
+      const inactiveThreshold = 5 * 60 * 1000; // 5 minutes
+
+      this.driverSockets.forEach((driverSocket, driverId) => {
+        if (driverSocket.lastActivity && 
+            (now.getTime() - driverSocket.lastActivity.getTime()) > inactiveThreshold) {
+          this.logger.warn(`Driver ${driverId} appears inactive, sending heartbeat`);
+          driverSocket.socket.emit('heartbeat', { timestamp: now.toISOString() });
+        }
+      });
+
+      // Send system status to operators
+      this.server.to('operators').emit('system:heartbeat', {
+        connectedDrivers: this.driverSockets.size,
+        activeDrivers: this.getActiveDriversCount(),
+        connectedOperators: this.operatorSockets.size,
+        timestamp: now.toISOString(),
+      });
+    }, this.HEARTBEAT_INTERVAL * 1000);
   }
 
-  getConnectedOperatorsCount(): number {
-    return this.operatorSockets.size;
+  private setOrderTimeout(orderId: string, driverId: string) {
+    const timeout = setTimeout(() => {
+      this.logger.warn(`Order ${orderId} acceptance timeout for driver ${driverId}`);
+      
+      // Notify operators
+      this.server.to('operators').emit('order:acceptance_timeout', {
+        orderId,
+        driverId,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Remove from timeouts map
+      this.orderTimeouts.delete(orderId);
+    }, this.ACCEPTANCE_TIMEOUT * 1000);
+
+    this.orderTimeouts.set(orderId, timeout);
   }
 
-  getDriversByVehicleType(vehicleType: VehicleType): string[] {
+  private getEligibleDrivers(
+    vehicleType: VehicleType,
+    pickupLocation: { lat: number; lng: number },
+    radius: number
+  ): string[] {
     return Array.from(this.driverSockets.entries())
-      .filter(([_, driverSocket]) => 
-        driverSocket.isActive && 
-        (!driverSocket.vehicleType || driverSocket.vehicleType === vehicleType)
-      )
+      .filter(([driverId, driverSocket]) => {
+        if (!driverSocket.isActive || driverSocket.currentOrderId) return false;
+        if (!driverSocket.location) return false;
+        
+        // Check vehicle type compatibility
+        if (driverSocket.vehicleType && driverSocket.vehicleType !== vehicleType) {
+          return false;
+        }
+
+        // Check proximity
+        const distance = this.calculateDistance(
+          driverSocket.location.lat,
+          driverSocket.location.lng,
+          pickupLocation.lat,
+          pickupLocation.lng
+        );
+        
+        return distance <= radius;
+      })
       .map(([driverId]) => driverId);
   }
 
@@ -582,12 +766,50 @@ export class OrdersGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     return degrees * (Math.PI / 180);
   }
 
-  // Health check method for monitoring
+  private transformOrderForEmit(order: any) {
+    return {
+      ...order,
+      baseFare: Number(order.baseFare || 0),
+      distanceFare: Number(order.distanceFare || 0),
+      totalFare: Number(order.totalFare || 0),
+    };
+  }
+
+  private getActiveDriversCount(): number {
+    return Array.from(this.driverSockets.values())
+      .filter(d => d.isActive && !d.currentOrderId).length;
+  }
+
+  private getActiveOrdersCount(): number {
+    return Array.from(this.driverSockets.values())
+      .filter(d => d.currentOrderId).length;
+  }
+
+  // Public methods for external services
+  getConnectedDriversCount(): number {
+    return this.driverSockets.size;
+  }
+
+  getConnectedOperatorsCount(): number {
+    return this.operatorSockets.size;
+  }
+
+  isDriverConnected(driverId: string): boolean {
+    return this.driverSockets.has(driverId);
+  }
+
+  getDriverLocation(driverId: string) {
+    const driverSocket = this.driverSockets.get(driverId);
+    return driverSocket?.location || null;
+  }
+
   getSystemHealth() {
     return {
       connectedDrivers: this.driverSockets.size,
-      activeDrivers: this.getConnectedDriversCount(),
+      activeDrivers: this.getActiveDriversCount(),
       connectedOperators: this.operatorSockets.size,
+      activeOrders: this.getActiveOrdersCount(),
+      pendingTimeouts: this.orderTimeouts.size,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     };
