@@ -299,16 +299,17 @@ export default function EnhancedBookingPanel({
 const handleDownloadReceipt = async () => {
   const receiptData = generateReceiptData();
 
-  // Create a large offscreen canvas so nothing gets clipped while drawing
-  const width = 300;
+  // Base for thermal 58mm
+  const BASE_WIDTH = 384; // recommended width for 58mm
+  const SCALE = 2; // 2x scale per permintaanmu
+  const width = BASE_WIDTH * SCALE; // 768 px
+
   const tempCanvas = document.createElement('canvas');
   const tempCtx = tempCanvas.getContext('2d')!;
 
-  // make temp canvas very tall to avoid clipping; we'll crop later
   tempCanvas.width = width;
-  tempCanvas.height = 4000;
+  tempCanvas.height = 4000 * SCALE; // tinggi sementara, nanti dicrop
 
-  // Check if context is available
   if (!tempCtx) {
     toast.error("Canvas Error", {
       description: "Unable to create canvas context for receipt generation",
@@ -317,38 +318,66 @@ const handleDownloadReceipt = async () => {
   }
 
   try {
-    // Set white background
+    // Background
     tempCtx.fillStyle = '#ffffff';
     tempCtx.fillRect(0, 0, width, tempCanvas.height);
 
-    // Set text styles
-    tempCtx.fillStyle = '#000000';
-    tempCtx.textAlign = 'left';
+    // Layout constants scaled
+    let yPos = 18 * SCALE; // start margin
+    const leftMargin = 12 * SCALE;
+    const rightMargin = width - 12 * SCALE;
+    const contentWidth = width - leftMargin - 12 * SCALE;
 
-    let yPos = 20;
-    const leftMargin = 16;
-    const rightMargin = width - 16;
+    // Font sizes as numbers (scaled)
+    const FS_XS = 18 * SCALE;
+    const FS_SM = 19 * SCALE;
+    const FS_MD = 20 * SCALE;
+    const FS_BOLD_SM = 20 * SCALE;
+    const FS_BOLD_MD = 22 * SCALE;
 
-    // Helper function to draw simple single-line text
-    const drawText = (text: string, x: number, y: number, fontSize: number = 12, fontWeight: string = 'normal', align: 'left' | 'center' | 'right' = 'left') => {
-      tempCtx.font = `${fontWeight} ${fontSize}px Arial, sans-serif`;
+    // Spacing parameters (tweak these if masih terasa rapat)
+    const LINE_GAP = 18 * SCALE;            // base extra gap added in drawText return
+    const EXTRA_VALUE_GAP = 8 * SCALE;      // extra offset between key and first value line
+    const EXTRA_BLOCK_GAP = 12 * SCALE;     // extra gap between blocks (e.g. after subtotal)
+
+    // Helper to create font string
+    const fontStr = (size: number, weight: 'normal' | 'bold' = 'normal') =>
+      `${weight === 'bold' ? 'bold ' : ''}${Math.round(size)}px Arial, sans-serif`;
+
+    // drawText helper
+    const drawText = (
+      text: string,
+      x: number,
+      y: number,
+      size: number = FS_SM,
+      weight: 'normal' | 'bold' = 'normal',
+      align: 'left' | 'center' | 'right' = 'left'
+    ) => {
+      tempCtx.font = fontStr(size, weight);
       tempCtx.textAlign = align;
+      tempCtx.fillStyle = '#000000';
       tempCtx.fillText(text, x, y);
-      return y + fontSize + 6;
+      return y + Math.round(size) + LINE_GAP;
     };
 
-    // Helper: wrap arbitrary text within maxWidth; returns new y
-    const wrapText = (text: string, x: number, y: number, maxWidth: number, font: string = '12px Arial, sans-serif', lineHeight: number = 14, align: 'left' | 'center' | 'right' = 'left') => {
-      tempCtx.font = font;
+    // wrapText helper with larger lineHeight default
+    const wrapText = (
+      text: string,
+      x: number,
+      y: number,
+      maxWidth: number,
+      size: number = FS_SM,
+      lineHeight: number = Math.round(FS_MD + (8 * SCALE)),
+      align: 'left' | 'center' | 'right' = 'left'
+    ) => {
+      tempCtx.font = fontStr(size, 'normal');
       tempCtx.textAlign = align;
-
       const words = text.split(' ');
       let line = '';
       for (let i = 0; i < words.length; i++) {
         const testLine = line + words[i] + ' ';
         const metrics = tempCtx.measureText(testLine);
-        const testWidth = metrics.width;
-        if (testWidth > maxWidth && line !== '') {
+        if (metrics.width > maxWidth && line !== '') {
           tempCtx.fillText(line.trim(), x, y);
           line = words[i] + ' ';
           y += lineHeight;
@@ -363,22 +392,32 @@ const handleDownloadReceipt = async () => {
       return y;
     };
 
-    // Helper: draw a label on left and a (possibly wrapped) value on the right.
-    // Returns new y after drawing all wrapped lines.
-    const drawKeyValue = (key: string, value: string, y: number, opts?: {
-      keyFont?: string; // e.g. 'bold 12px Arial, sans-serif'
-      valueFont?: string;
-      lineHeight?: number;
-      valueMaxWidth?: number;
-    }) => {
-      const keyFont = opts?.keyFont ?? 'bold 12px Arial, sans-serif';
-      const valueFont = opts?.valueFont ?? '12px Arial, sans-serif';
-      const lineHeight = opts?.lineHeight ?? 14;
-      const valueMaxWidth = opts?.valueMaxWidth ?? (width - leftMargin - 80); // leave space for label
+    /**
+     * drawKeyValue:
+     * - key printed at baseline y (left)
+     * - value lines printed starting at y + valueTopOffset (so key tidak 'menempel' pada baris pertama value)
+     * - valueLineHeight default lebih besar sehingga wrapped lines punya jarak baik
+     */
+    const drawKeyValue = (
+      key: string,
+      value: string,
+      y: number,
+      opts?: {
+        keySize?: number;
+        valueSize?: number;
+        valueLineHeight?: number;
+        valueMaxWidth?: number;
+      }
+    ) => {
+      const keySize = opts?.keySize ?? FS_BOLD_SM;
+      const valueSize = opts?.valueSize ?? FS_MD;
+      // valueLineHeight dibuat lebih besar untuk spasi antar baris value
+      const valueLineHeight = opts?.valueLineHeight ?? Math.round(valueSize + (10 * SCALE));
+      const valueMaxWidth = opts?.valueMaxWidth ?? (contentWidth - (80 * SCALE));
 
-      // Prepare value lines
-      tempCtx.font = valueFont;
-      const words = value.split(' ');
+      // Prepare wrapped lines for value
+      tempCtx.font = fontStr(valueSize, 'normal');
+      let words = value.split(' ');
       let line = '';
       const lines: string[] = [];
       for (let i = 0; i < words.length; i++) {
@@ -393,82 +432,79 @@ const handleDownloadReceipt = async () => {
       }
       if (line.trim()) lines.push(line.trim());
 
-      // Draw key on first line
-      tempCtx.font = keyFont;
+      // Draw key (left)
+      tempCtx.font = fontStr(keySize, 'bold');
       tempCtx.textAlign = 'left';
+      tempCtx.fillStyle = '#000000';
       tempCtx.fillText(key, leftMargin, y);
 
-      // Draw value lines right aligned at rightMargin
-      tempCtx.font = valueFont;
+      // Draw value lines (right-aligned) - start a bit lower to separate from key
+      tempCtx.font = fontStr(valueSize, 'normal');
       tempCtx.textAlign = 'right';
+      const valueStartY = y + EXTRA_VALUE_GAP;
       for (let i = 0; i < lines.length; i++) {
-        tempCtx.fillText(lines[i], rightMargin, y + i * lineHeight);
+        tempCtx.fillText(lines[i], rightMargin, valueStartY + i * valueLineHeight);
       }
 
-      // Return y after all lines
-      return y + lines.length * lineHeight;
+      // Return new y after all value lines + some extra gap
+      return valueStartY + lines.length * valueLineHeight + LINE_GAP;
     };
 
-    // Helper function to draw line (divider).
+    // Divider with slightly larger gap after
     const drawLine = (y: number) => {
       tempCtx.strokeStyle = '#cccccc';
-      tempCtx.lineWidth = 1;
+      tempCtx.lineWidth = Math.max(1 * SCALE, 1);
       tempCtx.beginPath();
       tempCtx.moveTo(leftMargin, y);
       tempCtx.lineTo(rightMargin, y);
       tempCtx.stroke();
-      return y + 10; // adjustable gap after divider
+      return y + (14 * SCALE);
     };
 
-    // Load logo image (same fallback logic)
-    const loadLogoImage = (): Promise<HTMLImageElement> => {
-      return new Promise((resolve, reject) => {
+    // Image loaders (unchanged except using SCALE constants)
+    const loadLogoImage = (): Promise<HTMLImageElement> =>
+      new Promise((resolve) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img);
         img.onerror = () => {
-          console.warn("Failed to load logo image, using fallback");
           const fallbackCanvas = document.createElement('canvas');
           const fallbackCtx = fallbackCanvas.getContext('2d')!;
-          fallbackCanvas.width = 60;
-          fallbackCanvas.height = 60;
+          const s = 64 * SCALE;
+          fallbackCanvas.width = s;
+          fallbackCanvas.height = s;
           fallbackCtx.fillStyle = '#1e40af';
           fallbackCtx.beginPath();
-          fallbackCtx.arc(30, 30, 28, 0, 2 * Math.PI);
+          fallbackCtx.arc(s / 2, s / 2, (s / 2) - (4 * SCALE), 0, 2 * Math.PI);
           fallbackCtx.fill();
           fallbackCtx.fillStyle = '#ffffff';
-          fallbackCtx.font = 'bold 10px Arial';
+          fallbackCtx.font = `${Math.round(12 * SCALE)}px Arial`;
           fallbackCtx.textAlign = 'center';
-          fallbackCtx.fillText('KOPSI', 30, 35);
+          fallbackCtx.fillText('KOPSI', s / 2, s / 2 + (6 * SCALE));
           const fallbackImg = new Image();
           fallbackImg.src = fallbackCanvas.toDataURL();
           fallbackImg.onload = () => resolve(fallbackImg);
         };
         img.src = '/logo-kopsi-pekanbaru.jpeg';
       });
-    };
 
-    // Load QR code image (same fallback logic)
-    const loadQRImage = (): Promise<HTMLImageElement> => {
-      return new Promise((resolve, reject) => {
+    const loadQRImage = (): Promise<HTMLImageElement> =>
+      new Promise((resolve) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img);
         img.onerror = () => {
-          console.warn("Failed to load QR code image, using fallback");
           const fallbackCanvas = document.createElement('canvas');
           const fallbackCtx = fallbackCanvas.getContext('2d')!;
-          fallbackCanvas.width = 120;
-          fallbackCanvas.height = 120;
+          const s = 120 * SCALE;
+          fallbackCanvas.width = s;
+          fallbackCanvas.height = s;
           fallbackCtx.fillStyle = '#ffffff';
-          fallbackCtx.fillRect(0, 0, 120, 120);
+          fallbackCtx.fillRect(0, 0, s, s);
           fallbackCtx.fillStyle = '#000000';
-          fallbackCtx.strokeRect(0, 0, 120, 120);
           for (let i = 0; i < 12; i++) {
             for (let j = 0; j < 12; j++) {
-              if ((i + j) % 3 === 0) {
-                fallbackCtx.fillRect(i * 10, j * 10, 10, 10);
-              }
+              if ((i + j) % 3 === 0) fallbackCtx.fillRect(i * (10 * SCALE), j * (10 * SCALE), 10 * SCALE, 10 * SCALE);
             }
           }
           const fallbackImg = new Image();
@@ -477,133 +513,135 @@ const handleDownloadReceipt = async () => {
         };
         img.src = '/qrcode.png';
       });
-    };
 
-    // Header date + time
-    yPos = drawText(receiptData.date, leftMargin, yPos, 10);
-    yPos = drawText(receiptData.time, rightMargin, yPos - 16, 10, 'normal', 'right');
+    // --- START DRAW ---
+    tempCtx.fillStyle = '#000000';
+    yPos = drawText(receiptData.date, leftMargin, yPos, FS_XS, 'normal', 'left');
+    // time on same baseline (manual)
+    tempCtx.font = fontStr(FS_XS, 'normal');
+    tempCtx.textAlign = 'right';
+    tempCtx.fillText(receiptData.time, rightMargin, yPos - (Math.round(FS_XS) + LINE_GAP));
+    tempCtx.textAlign = 'left';
 
-    // Logo section with increased spacing between logo and company name
-    yPos += 10;
+    // Logo
+    yPos += 6 * SCALE;
     const logoImg = await loadLogoImage();
-    const logoSize = 60;
+    const logoSize = 48 * SCALE;
     tempCtx.drawImage(logoImg, width / 2 - logoSize / 2, yPos, logoSize, logoSize);
-    yPos += logoSize + 16; // increase gap here (was 10)
+    yPos += logoSize + (12 * SCALE); // larger gap after logo
 
     // Company name
-    tempCtx.fillStyle = '#000000';
-    yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, 14, 'bold', 'center');
-    yPos += 10;
+    yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, FS_BOLD_MD, 'bold', 'center');
+    yPos += 6 * SCALE;
 
-    // Divider + extra gap before "Detail Perjalanan"
+    // Divider
     yPos = drawLine(yPos);
-    yPos += 10; // extra spacing between divider and section title
 
     // Detail Perjalanan
-    yPos = drawText('Detail Perjalanan :', leftMargin, yPos, 14, 'bold');
+    yPos = drawText('Detail Perjalanan:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+    yPos += 8 * SCALE;
 
-    // Dari / Tujuan (wrapped)
-    yPos = drawKeyValue('Dari :', receiptData.travel.from, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14,
-      valueMaxWidth: width - leftMargin - 100
+    // For addresses we increase valueMaxWidth so wrapping behaves better
+    yPos = drawKeyValue('Dari', receiptData.travel.from, yPos, {
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
+      valueMaxWidth: contentWidth - (60 * SCALE),
     });
-    yPos += 6;
 
-    yPos = drawKeyValue('Tujuan:', receiptData.travel.to, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14,
-      valueMaxWidth: width - leftMargin - 100
+    yPos = drawKeyValue('Tujuan', receiptData.travel.to, yPos, {
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
+      valueMaxWidth: contentWidth - (60 * SCALE),
     });
-    yPos += 8;
+
+    yPos += 8 * SCALE;
+    yPos = drawLine(yPos);
 
     // Detail Penumpang
-    yPos = drawText('Detail Penumpang :', leftMargin, yPos, 14, 'bold');
+    yPos = drawText('Detail Penumpang:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+    yPos += 8 * SCALE;
 
-    yPos = drawKeyValue('Nama Penumpang', receiptData.passenger.name, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14,
-      valueMaxWidth: width - leftMargin - 100
+    yPos = drawKeyValue('Nama', receiptData.passenger.name, yPos, {
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
     });
-    yPos += 4;
 
-    yPos = drawKeyValue('Nomor Handphone', receiptData.passenger.phone, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14,
-      valueMaxWidth: width - leftMargin - 100
+    yPos = drawKeyValue('HP', receiptData.passenger.phone, yPos, {
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
     });
-    yPos += 12;
+
+    yPos += 8 * SCALE;
+    yPos = drawLine(yPos);
 
     // Detail Tarif
-    yPos = drawText('Detail Tarif :', leftMargin, yPos, 14, 'bold');
+    yPos = drawText('Detail Tarif:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+    yPos += 8 * SCALE;
 
-    yPos = drawKeyValue('Jarak Tempuh (KM)', receiptData.fare.distanceKm.toFixed(1), yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14
+    yPos = drawKeyValue('Jarak (KM)', receiptData.fare.distanceKm.toFixed(1), yPos, {
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
     });
-    yPos += 4;
 
-    yPos = drawKeyValue('Tarif Per KM', `Rp ${receiptData.fare.farePerKm.toLocaleString()}`, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14
+    yPos = drawKeyValue('Tarif / KM', `Rp ${receiptData.fare.farePerKm.toLocaleString()}`, yPos, {
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
     });
-    yPos += 4;
 
-    const subtotal = receiptData.fare.distanceKm * receiptData.fare.farePerKm;
-    tempCtx.font = 'bold 12px Arial, sans-serif';
+    // Subtotal row and add extra block gap AFTER subtotal so next items tidak menempel
+    tempCtx.font = fontStr(FS_BOLD_SM, 'bold');
     tempCtx.textAlign = 'left';
-    tempCtx.fillText('Subtotal', width / 2, yPos);
+    tempCtx.fillText('Subtotal', leftMargin, yPos);
     tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${subtotal.toLocaleString()}`, rightMargin, yPos);
-    yPos += 18;
+    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.distanceKm * receiptData.fare.farePerKm).toLocaleString()}`, rightMargin, yPos);
+    yPos += (20 * SCALE);
+
+    // add extra gap so "Tarif Dasar" tidak menempel ke Subtotal
+    yPos += EXTRA_BLOCK_GAP;
 
     yPos = drawKeyValue('Tarif Dasar', `Rp ${receiptData.fare.baseFare.toLocaleString()}`, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
     });
-    yPos += 4;
 
     yPos = drawKeyValue('Airport Charge', `Rp ${receiptData.fare.airportCharge.toLocaleString()}`, yPos, {
-      keyFont: 'bold 12px Arial, sans-serif',
-      valueFont: '12px Arial, sans-serif',
-      lineHeight: 14
+      keySize: FS_BOLD_SM,
+      valueSize: FS_MD,
+      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
     });
-    yPos += 10;
 
-    // Divider before TOTAL and extra spacing
+    yPos += 8 * SCALE;
     yPos = drawLine(yPos);
-    yPos += 12;
+    yPos += 10 * SCALE;
 
-    tempCtx.font = 'bold 14px Arial, sans-serif';
+    // TOTAL
+    tempCtx.font = fontStr(24 * SCALE, 'bold');
     tempCtx.textAlign = 'left';
-    tempCtx.fillText('TOTAL', width / 2, yPos);
+    tempCtx.fillText('TOTAL', leftMargin, yPos);
     tempCtx.textAlign = 'right';
     tempCtx.fillText(`Rp ${receiptData.totalFare.toLocaleString()}`, rightMargin, yPos);
+    yPos += (28 * SCALE);
 
-    // IMPORTANT: advance yPos so following content (driver info) does not overlap
-    yPos += 24;
-
-    // Driver info if available (draw below TOTAL)
+    // Driver info
     if (receiptData.driver) {
-      yPos = drawText('Informasi Driver :', leftMargin, yPos, 12, 'bold');
-      yPos = drawText(`Nama : ${receiptData.driver.name}`, leftMargin, yPos, 10);
-      yPos = drawText(`Plat : ${receiptData.driver.plate}`, leftMargin, yPos, 10);
-      yPos = drawText(`HP : ${receiptData.driver.phone}`, leftMargin, yPos, 10);
-      yPos += 8;
+      yPos = drawText('Informasi Driver:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+      yPos = drawText(`Nama: ${receiptData.driver.name}`, leftMargin, yPos, FS_SM, 'normal');
+      yPos = drawText(`Plat: ${receiptData.driver.plate}`, leftMargin, yPos, FS_SM, 'normal');
+      yPos = drawText(`HP: ${receiptData.driver.phone}`, leftMargin, yPos, FS_SM, 'normal');
+      yPos += 12 * SCALE;
     }
 
-    // QR Code section (ensure QR + footer have space)
-    yPos += 6;
-    const qrSize = 120;
+    // QR Code (spacing generous)
+    yPos += 12 * SCALE;
+    const qrSize = 96 * SCALE;
     const qrX = width / 2 - qrSize / 2;
-
     try {
       const qrImg = await loadQRImage();
       tempCtx.drawImage(qrImg, qrX, yPos, qrSize, qrSize);
@@ -614,58 +652,57 @@ const handleDownloadReceipt = async () => {
       tempCtx.strokeStyle = '#cccccc';
       tempCtx.strokeRect(qrX, yPos, qrSize, qrSize);
       tempCtx.fillStyle = '#666666';
-      tempCtx.font = '12px Arial, sans-serif';
+      tempCtx.font = fontStr(FS_SM, 'normal');
       tempCtx.textAlign = 'center';
       tempCtx.fillText('QR Code', width / 2, yPos + qrSize / 2);
     }
-
-    yPos += qrSize + 12;
+    yPos += qrSize + (14 * SCALE);
 
     // QR description
     tempCtx.fillStyle = '#666666';
-    tempCtx.font = '10px Arial, sans-serif';
+    tempCtx.font = fontStr(FS_XS, 'normal');
     tempCtx.textAlign = 'center';
     tempCtx.fillText('Scan untuk verifikasi receipt', width / 2, yPos);
-    yPos += 16;
+    yPos += 16 * SCALE;
 
-    // Footer note (wrap)
+    // Footer note (wrap) with larger lineHeight
     tempCtx.fillStyle = '#666666';
-    tempCtx.font = 'italic 9px Arial, sans-serif';
+    tempCtx.font = `italic ${Math.round(12 * SCALE)}px Arial, sans-serif`;
     tempCtx.textAlign = 'left';
     const noteText = 'Catatan: Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.';
-    yPos = wrapText(noteText, leftMargin, yPos, width - 32, 'italic 9px Arial, sans-serif', 11, 'left');
-    yPos += 20;
+    yPos = wrapText(noteText, leftMargin, yPos, contentWidth, 12 * SCALE, Math.round(14 * SCALE), 'left');
+    yPos += 22 * SCALE;
 
-    // Compute actual height and copy only the used area into final canvas
-    const actualHeight = Math.max( yPos + 20, 300 ); // minimal reasonable height
+    // Final crop
+    const actualHeight = Math.max(yPos + (12 * SCALE), 200 * SCALE);
     const finalCanvas = document.createElement('canvas');
     const finalCtx = finalCanvas.getContext('2d')!;
     finalCanvas.width = width;
     finalCanvas.height = actualHeight;
 
-    // Fill final background white and copy the top portion from tempCanvas (crop to actualHeight)
     finalCtx.fillStyle = '#ffffff';
     finalCtx.fillRect(0, 0, width, actualHeight);
-    // drawImage(source, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
     finalCtx.drawImage(tempCanvas, 0, 0, width, actualHeight, 0, 0, width, actualHeight);
 
-    // Convert to JPG and trigger download
+    // Save PNG
     finalCanvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `receipt-kopsi-${receiptData.passenger.name.replace(/\s+/g, '-')}-${Date.now()}.jpg`;
+        a.download = `receipt-kopsi-${receiptData.passenger.name.replace(/\s+/g, '-')}-${Date.now()}.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
         toast.success("Receipt Downloaded!", {
-          description: "Receipt KOPSI telah disimpan",
+          description: "Receipt KOPSI telah disimpan (spacing diperbaiki).",
         });
+      } else {
+        toast.error("Error", { description: "Gagal menghasilkan file gambar" });
       }
-    }, 'image/jpeg', 0.9);
+    }, 'image/png');
 
   } catch (error) {
     console.error("Error generating receipt:", error);
@@ -674,6 +711,8 @@ const handleDownloadReceipt = async () => {
     });
   }
 };
+
+
 
 
 
