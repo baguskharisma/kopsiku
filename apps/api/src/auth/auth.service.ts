@@ -26,7 +26,7 @@ export class AuthService {
     }
 
     async login(loginDto: LoginDto) {
-        const { phone, password, deviceId } = loginDto;
+        const { phone, password, deviceId, deviceName, userAgent, ipAddress } = loginDto;
 
         // Validate user credentials
         const user = await this.validateUser(phone, password);
@@ -38,42 +38,17 @@ export class AuthService {
             throw new UnauthorizedException('Account is deactivated');
         }
 
-        // Check if user is already logged in on another device
-        const existingActiveTokens = await this.usersService.getActiveRefreshTokens(user.id);
-        
-        if (existingActiveTokens.length > 0) {
-            // Check if any of the existing tokens is from a different device
-            const differentDeviceToken = existingActiveTokens.find(token => 
-                token.deviceId && deviceId && token.deviceId !== deviceId
-            );
-            
-            if (differentDeviceToken) {
-                throw new UnauthorizedException(
-                    'Akun sudah login di perangkat lain. Silakan logout dari perangkat sebelumnya terlebih dahulu.'
-                );
-            }
-
-            // If same device, revoke old tokens first
-            if (deviceId) {
-                const sameDeviceTokens = existingActiveTokens.filter(token => 
-                    token.deviceId === deviceId
-                );
-                if (sameDeviceTokens.length > 0) {
-                    await this.usersService.revokeRefreshTokensByDevice(user.id, deviceId);
-                }
-            } else {
-                // If no deviceId provided, check if there are any active tokens
-                throw new UnauthorizedException(
-                    'Akun sudah login di perangkat lain. Silakan logout dari perangkat sebelumnya terlebih dahulu.'
-                );
-            }
-        }
-
         // Generate tokens
         const tokens = await this.generateTokens(user);
 
-        // Save refresh token with device info
-        await this.usersService.saveRefreshToken(user.id, tokens.refreshToken, deviceId);
+        // Save refresh token with device info - allowing multiple devices
+        await this.usersService.saveRefreshToken(
+            user.id, 
+            tokens.refreshToken, 
+            deviceId, 
+            userAgent, 
+            ipAddress
+        );
 
         // Update last login
         await this.usersService.updateLastLogin(user.id);

@@ -187,6 +187,7 @@ export const config = {
 		'/register',
 		// Dynamic paths
 		'/dashboard/:path*',
-		'/taxi/:path*'
+		'/taxi/:path*',
+		'/driver/:path*'
 	],
 };
