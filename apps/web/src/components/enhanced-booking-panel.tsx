@@ -1158,12 +1158,12 @@ const handleDownloadReceipt = async () => {
                   </span>
                 </div>
               )}
-              <div className="flex justify-between items-center mb-2">
+              {/* <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">Base fare</span>
                 <span className="text-sm" data-testid="text-base-fare">
                   {formatCurrency(fareEstimate.baseFare)}
                 </span>
-              </div>
+              </div> */}
               {fareEstimate.additionalKm > 0 && (
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-gray-600">
