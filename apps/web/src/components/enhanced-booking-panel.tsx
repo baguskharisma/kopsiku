@@ -63,7 +63,21 @@ const DEFAULT_DRIVERS: DriverOption[] = [
   { id: 'BM-1863-QU', name: 'Syafrizal', plate: 'BM 1863 QU', phone: '081378334227' },
   { id: 'BM-1865-QU', name: 'Hotler Sibagariang', plate: 'BM 1865 QU', phone: '081371573112' },
   { id: 'BM-1394-JU', name: 'Zalmi', plate: 'BM 1394 JU', phone: '085351138940' },
+  { id: 'BM-1399-JU', name: 'Jhon Kuntan', plate: 'BM 1399 JU', phone: '081364476663' },
+  { id: 'BM-1902-QU', name: 'Ari Brewok', plate: 'BM 1902 QU', phone: '' },
+  { id: 'BM-1904-QU', name: 'Yusnedi', plate: 'BM 1904 QU', phone: '08127658449' },
+  { id: 'BM-1905-QU', name: 'Defrizal', plate: 'BM 1905 QU', phone: '08127634408' },
+  { id: 'BM-1906-QU', name: 'Jaya Adha', plate: 'BM 1906 QU', phone: '085265456961' },
+  { id: 'BM-1907-QU', name: 'Yakub Efendi', plate: 'BM 1907 QU', phone: '085264015429' },
+  { id: 'BM-1924-QU', name: 'Ridwan', plate: 'BM 1924 QU', phone: '085271387541' },
+  { id: 'BM-1930-QU', name: 'Hendrizal', plate: 'BM 1930 QU', phone: '085194379507' },
+  { id: 'BM-1933-QU', name: 'Azwir', plate: 'BM 1933 QU', phone: '085278131464' },
+  { id: 'BM-1955-QU', name: 'Harry Yanson Hutabarat', plate: 'BM 1955 QU', phone: '085271543750' },
+  { id: 'BM-1956-QU', name: 'Sarmi', plate: 'BM 1956 QU', phone: '081371574888' },
+  { id: 'BM-1957-QU', name: 'Nofrizal', plate: 'BM 1957 QU', phone: '085274237100' },
+  { id: 'BM-1404-JU', name: 'Adam Cahyadi', plate: 'BM 1404 JU', phone: '085763579380' },
 ];
+
 
 interface EnhancedBookingPanelProps {
   currentLocation: Coordinates | null;
