@@ -44,7 +44,7 @@ export function calculateDistance(lat1: number, lng1: number, lat2: number, lng2
     const additionalKm = Math.round(rawAdditionalKm * 10) / 10;
   
     // compute additionalFare from the rounded additionalKm (KEEP CONSISTENT)
-    const additionalFare = Math.round(additionalKm * additionalKmRate);
+    const additionalFare = Math.round(additionalKm * additionalKmRate + baseFare);
   
     // Check if it's an airport trip
     const isAirportTrip = (pickupAddress && isAirportLocation(pickupAddress)) ||
