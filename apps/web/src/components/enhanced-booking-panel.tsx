@@ -617,7 +617,7 @@ const handleDownloadReceipt = async () => {
     tempCtx.textAlign = 'left';
     tempCtx.fillText('Subtotal', leftMargin, yPos);
     tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.distanceKm * receiptData.fare.farePerKm).toLocaleString()}`, rightMargin, yPos);
+    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.distanceKm * receiptData.fare.farePerKm + receiptData.fare.baseFare).toLocaleString()}`, rightMargin, yPos);
     yPos += (20 * SCALE);
 
     // add extra gap so "Tarif Dasar" tidak menempel ke Subtotal
