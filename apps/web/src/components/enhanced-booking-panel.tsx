@@ -1271,22 +1271,22 @@ const handleDownloadReceipt = async () => {
                 <div className="bg-gray-50 rounded-lg p-3">
                   <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Tarif :</h4>
                   <div className="space-y-1 text-xs">
-                    <div className="flex justify-between">
+                    {/* <div className="flex justify-between">
                       <strong>Jarak Tempuh (KM)</strong>
                       <span>{(routeData ? routeData.distance : fareEstimate.distance).toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between">
+                    </div> */}
+                    {/* <div className="flex justify-between">
                       <strong>Tarif Per KM</strong>
                       <span>Rp {fareEstimate.additionalKm > 0 ? Math.round(fareEstimate.additionalFare / fareEstimate.additionalKm).toLocaleString() : '0'}</span>
-                    </div>
+                    </div> */}
                     <div className="flex justify-between ml-auto w-1/2 border-t pt-1">
                       <strong>Subtotal</strong>
                       <strong>Rp {fareEstimate.additionalFare.toLocaleString()}</strong>
                     </div>
-                    <div className="flex justify-between">
+                    {/* <div className="flex justify-between">
                       <strong>Tarif Dasar</strong>
                       <span>Rp {fareEstimate.baseFare.toLocaleString()}</span>
-                    </div>
+                    </div> */}
                     <div className="flex justify-between">
                       <strong>Airport Charge</strong>
                       <span>Rp {(fareEstimate.airportFare || 0).toLocaleString()}</span>
