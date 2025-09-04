@@ -299,7 +299,7 @@ export default function EnhancedBookingPanel({
       },
       fare: {
         distanceKm: routeData ? routeData.distance : fareEstimate?.distance || 0,
-        farePerKm: fareEstimate?.additionalFare || 0,
+        farePerKm: fareEstimate ? Math.round(fareEstimate.additionalFare * (fareEstimate.additionalKm || 1)) : 0,
         baseFare: fareEstimate?.baseFare || 0,
         airportCharge: fareEstimate?.airportFare || 0,
       },
@@ -617,7 +617,7 @@ const handleDownloadReceipt = async () => {
     tempCtx.textAlign = 'left';
     tempCtx.fillText('Subtotal', leftMargin, yPos);
     tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.distanceKm * receiptData.fare.farePerKm).toLocaleString()}`, rightMargin, yPos);
+    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.farePerKm).toLocaleString()}`, rightMargin, yPos);
     yPos += (20 * SCALE);
 
     // add extra gap so "Tarif Dasar" tidak menempel ke Subtotal
