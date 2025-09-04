@@ -600,17 +600,17 @@ const handleDownloadReceipt = async () => {
     yPos = drawText('Detail Tarif:', leftMargin, yPos, FS_BOLD_SM, 'bold');
     yPos += 8 * SCALE;
 
-    yPos = drawKeyValue('Jarak (KM)', receiptData.fare.distanceKm.toFixed(1), yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
+    // yPos = drawKeyValue('Jarak (KM)', receiptData.fare.distanceKm.toFixed(1), yPos, {
+    //   keySize: FS_BOLD_SM,
+    //   valueSize: FS_MD,
+    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
+    // });
 
-    yPos = drawKeyValue('Tarif / KM', `Rp ${receiptData.fare.farePerKm.toLocaleString()}`, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
+    // yPos = drawKeyValue('Tarif / KM', `Rp ${receiptData.fare.farePerKm.toLocaleString()}`, yPos, {
+    //   keySize: FS_BOLD_SM,
+    //   valueSize: FS_MD,
+    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
+    // });
 
     // Subtotal row and add extra block gap AFTER subtotal so next items tidak menempel
     tempCtx.font = fontStr(FS_BOLD_SM, 'bold');
@@ -623,11 +623,11 @@ const handleDownloadReceipt = async () => {
     // add extra gap so "Tarif Dasar" tidak menempel ke Subtotal
     yPos += EXTRA_BLOCK_GAP;
 
-    yPos = drawKeyValue('Tarif Dasar', `Rp ${receiptData.fare.baseFare.toLocaleString()}`, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
+    // yPos = drawKeyValue('Tarif Dasar', `Rp ${receiptData.fare.baseFare.toLocaleString()}`, yPos, {
+    //   keySize: FS_BOLD_SM,
+    //   valueSize: FS_MD,
+    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
+    // });
 
     yPos = drawKeyValue('Airport Charge', `Rp ${receiptData.fare.airportCharge.toLocaleString()}`, yPos, {
       keySize: FS_BOLD_SM,
