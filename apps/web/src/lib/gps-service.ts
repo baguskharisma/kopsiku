@@ -17,7 +17,23 @@ export interface RouteResult {
   duration: number; // in minutes
 }
 
+// Updated interface for Google Places API
+export interface GooglePlaceResult {
+  place_id: string;
+  formatted_address: string;
+  geometry: {
+    location: {
+      lat: number;
+      lng: number;
+    };
+  };
+  name: string;
+  types: string[];
+}
+
+// Keeping NominatimResult for backward compatibility, but mapping from Google Places
 export interface NominatimResult {
+  name: string;
   place_id: number;
   licence: string;
   osm_type: string;
@@ -34,6 +50,7 @@ export interface NominatimResult {
     postcode?: string;
     country?: string;
   };
+  formatted_address: string;
 }
 
 class GPSService {
@@ -142,54 +159,153 @@ class GPSService {
   }
 
   /**
-   * Get route that follows actual roads - NO API KEY REQUIRED
+   * Get route using Google Directions API through our backend
    */
   async getRoute(start: Coordinates, end: Coordinates): Promise<RouteResult> {
     try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&steps=true`;
-
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("OSRM request failed");
-
-      const data = await res.json();
-      if (!data.routes || data.routes.length === 0) throw new Error("No route found");
-
-      const route = data.routes[0];
-
-      // Convert GeoJSON to RoutePoint[]
-      const coordinates: RoutePoint[] = route.geometry.coordinates.map(
-        ([lng, lat]: [number, number], index: number) => ({
-          lat,
-          lng,
-          instruction:
-            index === 0
-              ? "Mulai perjalanan"
-              : index === route.geometry.coordinates.length - 1
-              ? "Tiba di tujuan"
-              : "",
-        })
-      );
-
-      const distance = route.distance / 1000; // meters → km
-      const duration = route.duration / 60;   // seconds → minutes
-
-      toast.success("Rute ditemukan", {
-        description: `Jarak: ${distance.toFixed(1)} km, Waktu: ${duration.toFixed(0)} menit`,
+      // Try Google Directions API first through our backend proxy
+      const response = await fetch('/api/directions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          origin: `${start.lat},${start.lng}`,
+          destination: `${end.lat},${end.lng}`,
+          mode: 'driving',
+        }),
       });
 
-      return {
-        coordinates,
-        distance,
-        duration,
-      };
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          const leg = route.legs[0];
+          
+          // Extract coordinates from the route
+          const coordinates: RoutePoint[] = this.decodePolyline(route.overview_polyline.points)
+            .map((coord, index, array) => ({
+              lat: coord.lat,
+              lng: coord.lng,
+              instruction: 
+                index === 0 ? "Mulai perjalanan" :
+                index === array.length - 1 ? "Tiba di tujuan" : ""
+            }));
+
+          const distance = leg.distance.value / 1000; // meters to km
+          const duration = leg.duration.value / 60;   // seconds to minutes
+
+          toast.success("Rute ditemukan", {
+            description: `Jarak: ${distance.toFixed(1)} km, Waktu: ${Math.round(duration)} menit`,
+          });
+
+          return {
+            coordinates,
+            distance,
+            duration,
+          };
+        }
+      }
+
+      // Fallback to OSRM if Google Directions fails
+      throw new Error("Google Directions API failed");
+      
     } catch (error) {
-      console.error("OSRM routing failed:", error);
+      console.error("Google Directions failed, trying OSRM:", error);
+      
+      try {
+        // Fallback to OSRM
+        const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&steps=true`;
 
-      toast.error("Gagal ambil rute OSRM", {
-        description: "Menggunakan rute perkiraan",
-      });
-      return this.createSmartRoute(start, end);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("OSRM request failed");
+
+        const data = await res.json();
+        if (!data.routes || data.routes.length === 0) throw new Error("No route found");
+
+        const route = data.routes[0];
+
+        // Convert GeoJSON to RoutePoint[]
+        const coordinates: RoutePoint[] = route.geometry.coordinates.map(
+          ([lng, lat]: [number, number], index: number) => ({
+            lat,
+            lng,
+            instruction:
+              index === 0
+                ? "Mulai perjalanan"
+                : index === route.geometry.coordinates.length - 1
+                ? "Tiba di tujuan"
+                : "",
+          })
+        );
+
+        const distance = route.distance / 1000; // meters → km
+        const duration = route.duration / 60;   // seconds → minutes
+
+        toast.success("Rute ditemukan (OSRM)", {
+          description: `Jarak: ${distance.toFixed(1)} km, Waktu: ${duration.toFixed(0)} menit`,
+        });
+
+        return {
+          coordinates,
+          distance,
+          duration,
+        };
+      } catch (osrmError) {
+        console.error("OSRM routing failed:", osrmError);
+
+        toast.error("Gagal ambil rute", {
+          description: "Menggunakan rute perkiraan",
+        });
+        return this.createSmartRoute(start, end);
+      }
     }
+  }
+
+  /**
+   * Decode Google Maps polyline
+   */
+  private decodePolyline(encoded: string): Coordinates[] {
+    const points: Coordinates[] = [];
+    let index = 0;
+    const len = encoded.length;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < len) {
+      let b: number;
+      let shift = 0;
+      let result = 0;
+
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+
+      const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+
+      const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+      lng += dlng;
+
+      points.push({
+        lat: lat / 1e5,
+        lng: lng / 1e5,
+      });
+    }
+
+    return points;
   }
 
   /**
@@ -251,32 +367,35 @@ class GPSService {
   }
 
   /**
-   * Geocode address to coordinates using Nominatim
+   * Geocode address to coordinates using Google Geocoding API
    */
   async geocodeAddress(address: string): Promise<Coordinates | null> {
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&countrycodes=id&bounded=1&viewbox=95,-11,141,6`,
-        {
-          headers: {
-            'User-Agent': 'TaxiGoApp/1.0'
-          }
-        }
-      );
+      const response = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          address,
+          region: 'id', // Indonesia
+        }),
+      });
 
       if (!response.ok) {
         throw new Error("Failed to geocode address");
       }
 
-      const data: NominatimResult[] = await response.json();
+      const data = await response.json();
 
-      if (data.length === 0) {
+      if (!data.results || data.results.length === 0) {
         return null;
       }
 
+      const result = data.results[0];
       return {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon),
+        lat: result.geometry.location.lat,
+        lng: result.geometry.location.lng,
       };
     } catch (error) {
       console.error("Geocoding error:", error);
@@ -285,18 +404,18 @@ class GPSService {
   }
 
   /**
-   * Reverse geocode coordinates to address using Nominatim
+   * Reverse geocode coordinates to address using Google Geocoding API
    */
   async reverseGeocode(coords: Coordinates): Promise<string> {
     try {
       const response = await fetch(
-        `/api/reverse-geocode?lat=${coords.lat}&lon=${coords.lng}`
+        `/api/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`
       );
   
       if (!response.ok) throw new Error("Failed to reverse geocode");
   
       const data = await response.json();
-      return data.display_name || "Unknown location";
+      return data.formatted_address || data.display_name || "Unknown location";
     } catch (error) {
       console.error("Reverse geocode error:", error);
       throw error;
@@ -304,17 +423,67 @@ class GPSService {
   }
   
   /**
-   * Search for places using Nominatim with Indonesia focus
+   * Search for places using Google Places API (Text Search)
+   */
+  /**
+   * Search for places using Google Places API (Text Search)
    */
   async searchPlaces(query: string, limit = 10): Promise<NominatimResult[]> {
     try {
       const response = await fetch(`/api/search-places?q=${encodeURIComponent(query)}&limit=${limit}`);
       if (!response.ok) throw new Error("Failed to search places");
-      return await response.json();
+      
+      const data = await response.json();
+      
+      // Convert Google Places results to NominatimResult format for backward compatibility
+      if (data.results) {
+        return data.results.slice(0, limit).map((place: GooglePlaceResult, index: number): NominatimResult => {
+          // The API route has already processed the name properly
+          const placeName = place.name || 'Unknown Place';
+          
+          return {
+            place_id: parseInt(place.place_id.replace(/[^0-9]/g, '').slice(0, 10) || '0') || index,
+            licence: 'Google Places API',
+            osm_type: 'node',
+            osm_id: index,
+            lat: place.geometry.location.lat.toString(),
+            lon: place.geometry.location.lng.toString(),
+            name: placeName,
+            formatted_address: place.formatted_address || 'Unknown Address',
+            display_name: place.formatted_address || placeName, // Keep original for compatibility
+            address: this.parseGoogleAddress(place.formatted_address || ''),
+          };
+        });
+      }
+      
+      return [];
     } catch (error) {
       console.error("Place search error:", error);
       return [];
     }
+  }
+
+  /**
+   * Parse Google formatted address into components
+   */
+  private parseGoogleAddress(formatted_address: string): {
+    house_number?: string;
+    road?: string;
+    suburb?: string;
+    city?: string;
+    state?: string;
+    postcode?: string;
+    country?: string;
+  } {
+    const parts = formatted_address.split(',').map(part => part.trim());
+    
+    return {
+      road: parts[0] || undefined,
+      suburb: parts[1] || undefined,
+      city: parts[2] || undefined,
+      state: parts[3] || undefined,
+      country: parts[parts.length - 1] || 'Indonesia',
+    };
   }
 
   /**

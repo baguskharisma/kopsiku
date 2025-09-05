@@ -290,8 +290,8 @@ export default function EnhancedBookingPanel({
       date: dateString,
       time: timeString,
       travel: {
-        from: selectedPickup?.address || "Lokasi Saat Ini",
-        to: selectedDestination?.address || "",
+        from: selectedPickup?.display_name || "Lokasi Saat Ini",
+        to: selectedDestination?.display_name || "",
       },
       passenger: {
         name: passengerName,
@@ -993,48 +993,48 @@ const handleDownloadReceipt = async () => {
 
           {/* Location Inputs */}
           <div className="space-y-3 mb-6">
-            <Button
-              variant="outline"
-              className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
-              onClick={onPickupClick}
-              data-testid="button-select-pickup"
-            >
-              <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
-              <div className="flex flex-col items-start w-full min-w-0">
-                <p className={`font-medium w-full break-words whitespace-normal text-start ${
-                  selectedPickup ? "text-gray-900" : "text-gray-400"
-                }`}>
-                  {selectedPickup ? selectedPickup.name : "Dari mana?"}
-                </p>
-                {selectedPickup && (
-                  <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
-                    {selectedPickup.address}
-                  </p>
-                )}
-              </div>
-            </Button>
+  <Button
+    variant="outline"
+    className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
+    onClick={onPickupClick}
+    data-testid="button-select-pickup"
+  >
+    <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
+    <div className="flex flex-col items-start w-full min-w-0">
+      <p className={`font-medium w-full break-words whitespace-normal text-start ${
+        selectedPickup ? "text-gray-900" : "text-gray-400"
+      }`}>
+        {selectedPickup ? selectedPickup.display_name : "Dari mana?"}
+      </p>
+      {selectedPickup && (
+        <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
+          {selectedPickup.formatted_address}
+        </p>
+      )}
+    </div>
+  </Button>
 
-            <Button
-              variant="outline"
-              className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
-              onClick={onDestinationClick}
-              data-testid="button-select-destination"
-            >
-              <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
-              <div className="flex flex-col items-start w-full min-w-0">
-                <p className={`font-medium w-full break-words whitespace-normal text-start ${
-                  selectedDestination ? "text-gray-900" : "text-gray-400"
-                }`}>
-                  {selectedDestination ? selectedDestination.name : "Mau ke mana?"}
-                </p>
-                {selectedDestination && (
-                  <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
-                    {selectedDestination.address}
-                  </p>
-                )}
-              </div>
-            </Button>
-          </div>
+  <Button
+    variant="outline"
+    className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
+    onClick={onDestinationClick}
+    data-testid="button-select-destination"
+  >
+    <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
+    <div className="flex flex-col items-start w-full min-w-0">
+      <p className={`font-medium w-full break-words whitespace-normal text-start ${
+        selectedDestination ? "text-gray-900" : "text-gray-400"
+      }`}>
+        {selectedDestination ? selectedDestination.display_name : "Mau ke mana?"}
+      </p>
+      {selectedDestination && (
+        <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
+          {selectedDestination.formatted_address}
+        </p>
+      )}
+    </div>
+  </Button>
+</div>
 
           {/* Vehicle Type Selection */}
           <div className="mb-6">
@@ -1247,8 +1247,8 @@ const handleDownloadReceipt = async () => {
               <div className="bg-gray-50 rounded-lg p-3">
                 <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Perjalanan :</h4>
                 <div className="space-y-1 text-xs">
-                  <p><strong>Dari :</strong> {selectedPickup?.address || "Lokasi Saat Ini"}</p>
-                  <p><strong>Tujuan :</strong> {selectedDestination?.address}</p>
+                  <p><strong>Dari :</strong> {selectedPickup?.display_name || "Lokasi Saat Ini"}</p>
+                  <p><strong>Tujuan :</strong> {selectedDestination?.display_name}</p>
                 </div>
               </div>
 

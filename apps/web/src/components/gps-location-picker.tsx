@@ -17,8 +17,8 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { gpsService, type Coordinates, type NominatimResult } from "@/lib/gps-service";
 import type { Location } from "@/lib/types";
-import LeafletMapClient from "./leaflet-map-client"; // gunakan komponen map client yang sudah kamu punya
 import { createPortal } from "react-dom";
+import GoogleMapsClient from "./google-maps-client"; // Updated to use Google Maps
 
 interface GPSLocationPickerProps {
   onClose: () => void;
@@ -78,7 +78,6 @@ export default function GPSLocationPicker({
       if (!response.ok) throw new Error("Failed to fetch locations");
       return response.json(); // asumsikan bentuk { success: true, data: Location[] }
     },
-    // jika response shape berbeda, pastikan menyesuaikan
   });
 
   // normalize locations array
@@ -163,6 +162,8 @@ export default function GPSLocationPicker({
         icon: "building",
         isActive: true,
         searchCount: 0,
+        display_name: result.name,
+        formatted_address: result.address?.road || "",
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -191,6 +192,8 @@ export default function GPSLocationPicker({
         icon: "building",
         isActive: true,
         searchCount: 0,
+        display_name: "Lokasi Saat Ini",
+        formatted_address: "Lokasi Saat Ini",
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -219,6 +222,8 @@ export default function GPSLocationPicker({
       icon: "building",
       isActive: true,
       searchCount: 0,
+      display_name: "Selected location",
+      formatted_address: "Selected location",
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -276,7 +281,7 @@ export default function GPSLocationPicker({
           </h2>
         </div>
 
-        {/* MAP area (klik untuk pilih) */}
+        {/* MAP area (klik untuk pilih) - Updated to use Google Maps */}
         <div className="mb-4">
           <div className="text-xs text-gray-500 mb-2 flex items-center justify-between">
             <span>{mode === "pickup" ? "Tap on map to choose pickup" : "Tap on map to choose destination"}</span>
@@ -291,7 +296,7 @@ export default function GPSLocationPicker({
           </div>
 
           <div className="h-56 w-full rounded-lg overflow-hidden border">
-            <LeafletMapClient
+            <GoogleMapsClient
               currentLocation={userLocation}
               destination={tempSelection ?? undefined}
               selectedPickup={undefined}
@@ -375,10 +380,14 @@ export default function GPSLocationPicker({
                     <MapPin className="h-5 w-5 text-gray-900" />
                   </div>
                   <div className="flex-1">
+                    {/* Use result.name first (business name), fallback to address parts */}
                     <p className="font-medium text-gray-900">
-                      {result.address?.road || result.display_name.split(",")[0]}
+                      {result.name || result.address?.road || result.display_name.split(",")[0]}
                     </p>
-                    <p className="text-sm text-gray-500 truncate">{result.display_name}</p>
+                    {/* Show full address as secondary info */}
+                    <p className="text-sm text-gray-500 truncate">
+                      {result.formatted_address || result.display_name}
+                    </p>
                   </div>
                 </Button>
               ))

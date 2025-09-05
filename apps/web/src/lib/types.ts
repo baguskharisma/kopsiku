@@ -12,6 +12,8 @@ export interface Location {
   description?: string | null;
   isActive: boolean;
   searchCount: number;
+  display_name: string;
+  formatted_address: string;
   createdAt: Date;
   updatedAt: Date;
 }
