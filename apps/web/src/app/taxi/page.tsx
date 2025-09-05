@@ -106,7 +106,7 @@ export default function TaxiAppMainPage() {
               className="w-full h-full"
               // Pass pick mode & click handler if you want click-to-select without opening modal
               mapClickMode={showPickupPicker ? "pickup" : showLocationPicker ? "destination" : null}
-              onMapClick={async (coords, type) => {
+              onMapClick={async (coords: any, type: any) => {
                 // Only accept click if mode active
                 if (type === "pickup") {
                   const address = await gpsService.reverseGeocode(coords).catch(() => null);
@@ -120,6 +120,8 @@ export default function TaxiAppMainPage() {
                     icon: "building", 
                     isActive: true, 
                     searchCount: 0, 
+                    display_name: "",
+                    formatted_address: "",
                     createdAt: new Date(), 
                     updatedAt: new Date() 
                   });
@@ -135,6 +137,8 @@ export default function TaxiAppMainPage() {
                     icon: "building", 
                     isActive: true, 
                     searchCount: 0, 
+                    display_name: "",
+                    formatted_address: "",
                     createdAt: new Date(), 
                     updatedAt: new Date() 
                   });
