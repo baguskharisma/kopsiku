@@ -43,7 +43,7 @@ export default function GoogleMapsClient({
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<{ [k: string]: google.maps.Marker }>({});
-  const routeRendererRef = useRef<google.maps.DirectionsRenderer | google.maps.Polyline | null>(null);
+  const routePolylineRef = useRef<google.maps.Polyline | null>(null);
   const tempMarkerRef = useRef<google.maps.Marker | null>(null);
   const isInitializedRef = useRef(false);
   const [isMapReady, setIsMapReady] = useState(false);
@@ -100,10 +100,10 @@ export default function GoogleMapsClient({
   // Cleanup function
   const cleanup = useCallback(() => {
     try {
-      // Clear route renderer
-      if (routeRendererRef.current) {
-        routeRendererRef.current.setMap(null);
-        routeRendererRef.current = null;
+      // Clear route polyline
+      if (routePolylineRef.current) {
+        routePolylineRef.current.setMap(null);
+        routePolylineRef.current = null;
       }
 
       // Clear markers
@@ -359,7 +359,7 @@ export default function GoogleMapsClient({
     isGoogleLoaded
   ]);
 
-  // Update route
+  // Update route - FIXED VERSION
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !isInitializedRef.current || !isGoogleLoaded) {
@@ -368,19 +368,19 @@ export default function GoogleMapsClient({
     }
 
     try {
-      // Clear existing route
-      if (routeRendererRef.current) {
-        console.log('Removing existing route renderer');
-        routeRendererRef.current.setMap(null);
-        routeRendererRef.current = null;
+      // Clear existing route polyline
+      if (routePolylineRef.current) {
+        console.log('Removing existing route polyline');
+        routePolylineRef.current.setMap(null);
+        routePolylineRef.current = null;
       }
 
-      // Validate route data before adding
-      if (routeData && showRoute) {
+      // Add new route if data exists and should be shown
+      if (routeData && showRoute && routeData.coordinates && Array.isArray(routeData.coordinates)) {
         console.log('Processing route data:', routeData);
         
-        if (!routeData.coordinates || !Array.isArray(routeData.coordinates) || routeData.coordinates.length < 2) {
-          console.warn('Invalid route data:', routeData);
+        if (routeData.coordinates.length < 2) {
+          console.warn('Not enough coordinates for route:', routeData.coordinates.length);
           return;
         }
 
@@ -400,58 +400,42 @@ export default function GoogleMapsClient({
           return;
         }
 
-        console.log(`Creating route with ${validCoords.length} coordinates`);
+        console.log(`Creating route polyline with ${validCoords.length} coordinates`);
         
-        // Create route renderer
-        routeRendererRef.current = new google.maps.DirectionsRenderer({
-          suppressMarkers: true, // We handle markers separately
-          polylineOptions: {
-            strokeColor: '#fcba03',
-            strokeWeight: 5,
-            strokeOpacity: 0.8
-          }
+        // Create path from coordinates
+        const path = validCoords.map((coord: any) => new google.maps.LatLng(coord.lat, coord.lng));
+
+        // Create polyline with yellow color
+        routePolylineRef.current = new google.maps.Polyline({
+          path: path,
+          geodesic: true,
+          strokeColor: '#fcba03', // Yellow color as requested
+          strokeOpacity: 0.8,
+          strokeWeight: 5,
+          clickable: false
         });
 
-        // Create path from coordinates
-        const path = validCoords.map((coord: any) => ({
-          lat: coord.lat,
-          lng: coord.lng
-        }));
-
-        // Create a fake directions result for rendering
-        // const fakeDirectionsResult: google.maps.DirectionsResult = {
-        //   geocoded_waypoints: [],
-        //   routes: [{
-        //     bounds: new google.maps.LatLngBounds(),
-        //     copyrights: '',
-        //     legs: [{
-        //       distance: { text: `${routeData.distance.toFixed(1)} km`, value: Math.round(routeData.distance * 1000) },
-        //       duration: { text: `${Math.round(routeData.duration)} min`, value: Math.round(routeData.duration * 60) },
-        //       end_address: '',
-        //       end_location: new google.maps.LatLng(path[path.length - 1].lat, path[path.length - 1].lng),
-        //       start_address: '',
-        //       start_location: new google.maps.LatLng(path[0].lat, path[0].lng),
-        //       steps: [],
-        //       traffic_speed_entry: [],
-        //       via_waypoints: [],
-        //     }],
-        //     overview_path: path.map((coord: any) => new google.maps.LatLng(coord.lat, coord.lng)),
-        //     overview_polyline: '',
-        //     summary: '',
-        //     warnings: [],
-        //     waypoint_order: [],
-        //   }]
-        // };
-        // routeRendererRef.current.setDirections(fakeDirectionsResult);
-        // routeRendererRef.current.setMap(map);
+        // Add polyline to map
+        routePolylineRef.current.setMap(map);
         
-        // console.log('Route polyline added to Google Maps successfully');
+        console.log('Route polyline added to Google Maps successfully');
         
         // Fit bounds to show the entire route
         try {
           const bounds = new google.maps.LatLngBounds();
-          path.forEach(point => bounds.extend(point));
+          validCoords.forEach(coord => bounds.extend(new google.maps.LatLng(coord.lat, coord.lng)));
           map.fitBounds(bounds);
+          
+          // Ensure reasonable zoom level
+          google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+            const currentZoom = map.getZoom();
+            if (currentZoom && currentZoom > 16) {
+              map.setZoom(16);
+            } else if (currentZoom && currentZoom < 10) {
+              map.setZoom(12);
+            }
+          });
+          
           console.log('Map fitted to route bounds');
         } catch (boundsError) {
           console.warn('Error fitting bounds to route:', boundsError);
@@ -465,14 +449,14 @@ export default function GoogleMapsClient({
       }
     } catch (error) {
       console.error('Error updating route:', error);
-      // Clean up failed route renderer
-      if (routeRendererRef.current) {
+      // Clean up failed polyline
+      if (routePolylineRef.current) {
         try {
-          routeRendererRef.current.setMap(null);
+          routePolylineRef.current.setMap(null);
         } catch (cleanupError) {
-          console.warn('Error cleaning up failed route renderer:', cleanupError);
+          console.warn('Error cleaning up failed route polyline:', cleanupError);
         }
-        routeRendererRef.current = null;
+        routePolylineRef.current = null;
       }
     }
   }, [routeData, showRoute, isMapReady, isGoogleLoaded]);
