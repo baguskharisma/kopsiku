@@ -984,7 +984,7 @@ const handleDownloadReceipt = async () => {
                   <div>
                     <p className="font-medium text-gray-900">Estimasi perjalanan</p>
                     <p className="text-sm text-gray-500">
-                      {routeData.distance.toFixed(1)} km â€¢ {Math.round(routeData.duration)} min
+                      {routeData.distance.toFixed(1)} km | {Math.round(routeData.duration)} min
                     </p>
                   </div>
                 </div>
@@ -1073,7 +1073,7 @@ const handleDownloadReceipt = async () => {
                         <p className="font-medium text-gray-900">{vehicle.name}</p>
                         <p className="text-sm text-gray-500">{vehicle.description}</p>
                         <p className="text-xs text-gray-400">
-                          {vehicle.features.slice(0, 2).join(" â€¢ ")}
+                          {vehicle.features.slice(0, 2).join(" | ")}
                         </p>
                       </div>
                       {fareEstimate && (
@@ -1140,7 +1140,7 @@ const handleDownloadReceipt = async () => {
                 <option value="">Pilih Driver</option>
                 {availableDrivers.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name} â€” {d.plate}
+                    {d.name} | {d.plate}
                   </option>
                 ))}
               </select>
@@ -1213,7 +1213,7 @@ const handleDownloadReceipt = async () => {
               : isCalculatingRoute
                 ? "Calculating route..."
                 : selectedDestination && currentLocation && fareEstimate
-                  ? `Book ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name} â€¢ ${formatCurrency(getVehiclePrice(fareEstimate.totalFare, selectedVehicleType))}`
+                  ? `Book ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name} ${formatCurrency(getVehiclePrice(fareEstimate.totalFare, selectedVehicleType))}`
                   : !currentLocation
                     ? "Getting your location..."
                     : "Choose destination to book"

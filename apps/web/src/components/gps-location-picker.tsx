@@ -177,80 +177,169 @@ export default function GPSLocationPicker({
   };
 
   // Use current position
-  const handleUseCurrentLocation = async () => {
-    try {
-      const position = await gpsService.getCurrentPosition();
-      const address = await gpsService.reverseGeocode(position).catch(() => null);
+// Helper function to extract meaningful location name
+const extractLocationName = (address: string): string => {
+  if (!address) return "Current Location";
+  
+  const parts = address.split(",").map(part => part.trim());
+  
+  // Filter out Plus Codes (format like "FFXR+C8F") and coordinates
+  const filteredParts = parts.filter(part => {
+    // Skip Plus Codes (contains + and alphanumeric)
+    if (/^[A-Z0-9]+\+[A-Z0-9]+/.test(part)) return false;
+    // Skip coordinate-like strings
+    if (/^-?\d+\.?\d*$/.test(part)) return false;
+    // Skip very short parts (likely abbreviations)
+    if (part.length < 3) return false;
+    // Skip country codes and postal codes
+    if (/^\d{5}$/.test(part)) return false;
+    return true;
+  });
+  
+  // Find the most specific location name
+  // Usually street name, building name, or area name comes first after filtering
+  const meaningfulName = filteredParts.find(part => {
+    // Prefer parts that contain common Indonesian location indicators
+    const indonesianLocationKeywords = [
+      'jl', 'jalan', 'gang', 'gg', 'blok', 'komplek', 'perumahan', 
+      'mall', 'plaza', 'gedung', 'tower', 'apartemen', 'hotel',
+      'kantor', 'sekolah', 'universitas', 'rumah sakit', 'rs',
+      'masjid', 'gereja', 'pasar', 'terminal', 'stasiun'
+    ];
+    
+    const lowerPart = part.toLowerCase();
+    return indonesianLocationKeywords.some(keyword => 
+      lowerPart.includes(keyword)
+    );
+  });
+  
+  // If we found a meaningful name, use it
+  if (meaningfulName) return meaningfulName;
+  
+  // Otherwise use the first filtered part
+  if (filteredParts.length > 0) return filteredParts[0];
+  
+  // Fallback to a more generic current location
+  return "Lokasi Terkini";
+};
 
-      const location: Location = {
-        id: `current-${Date.now()}`,
-        name: "Lokasi Saat Ini",
-        address: address || `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`,
-        lat: position.lat,
-        lng: position.lng,
-        category: "CUSTOM",
-        icon: "building",
-        isActive: true,
-        searchCount: 0,
-        display_name: "Lokasi Saat Ini",
-        formatted_address: "Lokasi Saat Ini",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+// Use current position
+const handleUseCurrentLocation = async () => {
+  try {
+    const position = await gpsService.getCurrentPosition();
+    
+    // Show loading state
+    toast.loading("Getting your location...", { id: "current-location" });
+    
+    const address = await gpsService.reverseGeocode(position).catch(() => null);
+    
+    // Extract meaningful location name
+    const locationName = address 
+      ? extractLocationName(address)
+      : `Location ${position.lat.toFixed(4)}, ${position.lng.toFixed(4)}`;
+    
+    const fullAddress = address || `${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`;
 
-      onSelectDestination(location);
-      onClose();
-    } catch (error) {
-      toast.error("Location Error", {
-        description:
-          error instanceof Error ? error.message : "Unable to get your location",
-      });
-    }
-  };
-
-  // Handler ketika user klik di map
-  const handleMapClick = async (coords: Coordinates, clickType: "pickup" | "destination") => {
-    // Accept both types, but our modal is usually used for destination selection.
-    // Set marker sementara
-    const tempLoc: Location = {
-      id: `temp-${Date.now()}`,
-      name: "Selected location",
-      address: "Loading address...",
-      lat: coords.lat,
-      lng: coords.lng,
+    const location: Location = {
+      id: `current-${Date.now()}`,
+      name: locationName, // Use extracted meaningful name
+      address: fullAddress,
+      lat: position.lat,
+      lng: position.lng,
       category: "CUSTOM",
       icon: "building",
       isActive: true,
       searchCount: 0,
-      display_name: "Selected location",
-      formatted_address: "Selected location",
+      display_name: locationName, // Use extracted meaningful name
+      formatted_address: fullAddress,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    setTempSelection(tempLoc);
 
-    setIsReverseing(true);
-    try {
-      // reverse geocode via gpsService (harus proxied via /api/reverse-geocode)
-      const address = await gpsService.reverseGeocode(coords);
-      const finalLoc: Location = {
-        ...tempLoc,
-        name: address?.split(",")[0] || tempLoc.name,
-        address: address || `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`,
-      };
+    // Dismiss loading toast and show success
+    toast.success("Location found", { 
+      id: "current-location",
+      description: location.address 
+    });
 
-      // return to parent
-      onSelectDestination(finalLoc);
-      toast.success("Location selected", { description: finalLoc.address });
-      onClose();
-    } catch (error) {
-      console.error("Reverse geocode error:", error);
-      toast.error("Failed to get address for selected location");
-      // keep temp selection so user sees the marker; don't auto close
-    } finally {
-      setIsReverseing(false);
-    }
+    onSelectDestination(location);
+    onClose();
+  } catch (error) {
+    toast.error("Location Error", {
+      id: "current-location",
+      description:
+        error instanceof Error ? error.message : "Unable to get your location",
+    });
+  }
+};
+
+// Handler ketika user klik di map
+const handleMapClick = async (coords: Coordinates, clickType: "pickup" | "destination") => {
+  // Accept both types, but our modal is usually used for destination selection.
+  // Set marker sementara
+  const tempLoc: Location = {
+    id: `temp-${Date.now()}`,
+    name: "Getting location...",
+    address: "Loading address...",
+    lat: coords.lat,
+    lng: coords.lng,
+    category: "CUSTOM",
+    icon: "building",
+    isActive: true,
+    searchCount: 0,
+    display_name: "Getting location...",
+    formatted_address: "Getting location...",
+    createdAt: new Date(),
+    updatedAt: new Date(),
   };
+  setTempSelection(tempLoc);
+
+  setIsReverseing(true);
+  try {
+    // reverse geocode via gpsService (harus proxied via /api/reverse-geocode)
+    const address = await gpsService.reverseGeocode(coords);
+    
+    // Extract meaningful location name using the same helper function
+    const locationName = address 
+      ? extractLocationName(address)
+      : `Location ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`;
+    
+    const fullAddress = address || `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`;
+    
+    const finalLoc: Location = {
+      ...tempLoc,
+      name: locationName, // Use extracted meaningful name
+      address: fullAddress,
+      display_name: locationName, // Use extracted meaningful name
+      formatted_address: fullAddress,
+    };
+
+    // Update tempSelection with real data so the marker shows correct info
+    setTempSelection(finalLoc);
+
+    // return to parent
+    onSelectDestination(finalLoc);
+    toast.success("Location selected", { description: finalLoc.address });
+    onClose();
+  } catch (error) {
+    console.error("Reverse geocode error:", error);
+    
+    // Update tempSelection with fallback data even on error
+    const fallbackLoc: Location = {
+      ...tempLoc,
+      name: `Location ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`,
+      address: `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`,
+      display_name: `Location ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`,
+      formatted_address: `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`,
+    };
+    setTempSelection(fallbackLoc);
+    
+    toast.error("Failed to get address for selected location");
+    // keep temp selection so user sees the marker; don't auto close
+  } finally {
+    setIsReverseing(false);
+  }
+};
 
   const clearSearch = () => {
     setSearchQuery("");
