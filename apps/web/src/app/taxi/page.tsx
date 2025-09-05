@@ -120,8 +120,8 @@ export default function TaxiAppMainPage() {
                     icon: "building", 
                     isActive: true, 
                     searchCount: 0, 
-                    // display_name: "",
-                    // formatted_address: "",
+                    display_name: "",
+                    formatted_address: "",
                     createdAt: new Date(), 
                     updatedAt: new Date() 
                   });
@@ -137,8 +137,8 @@ export default function TaxiAppMainPage() {
                     icon: "building", 
                     isActive: true, 
                     searchCount: 0, 
-                    // display_name: "",
-                    // formatted_address: "",
+                     display_name: "",
+                    formatted_address: "",
                     createdAt: new Date(), 
                     updatedAt: new Date() 
                   });
