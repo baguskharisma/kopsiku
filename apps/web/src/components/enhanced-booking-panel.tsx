@@ -290,8 +290,8 @@ export default function EnhancedBookingPanel({
       date: dateString,
       time: timeString,
       travel: {
-        from: selectedPickup?.display_name || "Lokasi Saat Ini",
-        to: selectedDestination?.display_name || "",
+        from: selectedPickup?.display_name || selectedPickup?.name || "Lokasi Saat Ini",
+        to: selectedDestination?.display_name || selectedDestination?.name || "Lokasi Saat Ini",
       },
       passenger: {
         name: passengerName,
@@ -1255,8 +1255,8 @@ const handleDownloadReceipt = async () => {
               <div className="bg-gray-50 rounded-lg p-3">
                 <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Perjalanan :</h4>
                 <div className="space-y-1 text-xs">
-                  <p><strong>Dari :</strong> {selectedPickup?.display_name || "Lokasi Saat Ini"}</p>
-                  <p><strong>Tujuan :</strong> {selectedDestination?.display_name}</p>
+                  <p><strong>Dari :</strong> {selectedPickup?.display_name || selectedPickup?.name || "Lokasi Saat Ini"}</p>
+                  <p><strong>Tujuan :</strong> {selectedDestination?.display_name ?? selectedDestination?.name}</p>
                 </div>
               </div>
 
