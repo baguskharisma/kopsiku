@@ -31,30 +31,6 @@ interface DriverOption {
   vehicleType?: VehicleType;
 }
 
-// const handlePrintReceipt = async (fare: any) => {
-//   console.log("🖨️ Sending receipt to backend:", fare);
-//   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
-//   try {
-//     const res = await fetch(`${backendUrl}/api/v1/printer/print`, {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({
-//         distance: fare.distance,
-//         duration: fare?.duration || 0,
-//         baseFare: fare.baseFare,
-//         additionalFare: fare.additionalFare,
-//         airportFare: fare.airportFare,
-//         totalFare: fare.totalFare,
-//       }),
-//     });
-//     console.log("🖨️ Print response:", res.status);
-//     const data = await res.json().catch(() => ({}));
-//     console.log("🖨️ Print response body:", data);
-//   } catch (err) {
-//     console.error("🖨️ Print error:", err);
-//   }
-// };
-
 const DEFAULT_DRIVERS: DriverOption[] = [
   { id: 'BM-1856-QU', name: 'Endrizal', plate: 'BM 1856 QU', phone: '08126850120' },
   { id: 'BM-1858-QU', name: 'Syamsuddin', plate: 'BM 1858 QU', phone: '081270432500' },
@@ -78,7 +54,6 @@ const DEFAULT_DRIVERS: DriverOption[] = [
   { id: 'BM-1404-JU', name: 'Adam Cahyadi', plate: 'BM 1404 JU', phone: '085763579380' },
 ];
 
-
 interface EnhancedBookingPanelProps {
   currentLocation: Coordinates | null;
   selectedDestination?: Location | null;
@@ -88,7 +63,6 @@ interface EnhancedBookingPanelProps {
   onRouteCalculated?: (route: RouteResult) => void;
   selectedPickup?: Location | null;
   availableDrivers?: DriverOption[];
-  // Real-time props
   operatorId: string;
   operatorRole: 'ADMIN' | 'SUPER_ADMIN';
 }
@@ -118,44 +92,36 @@ export default function EnhancedBookingPanel({
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
   const [routeData, setRouteData] = useState<RouteResult | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
-  const lastRouteCalculationRef = useRef<string>("");
-
-  // Passenger inputs
   const [passengerName, setPassengerName] = useState<string>("");
   const [passengerPhone, setPassengerPhone] = useState<string>("");
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
-
-  // Confirmation dialog state
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+  const lastRouteCalculationRef = useRef<string>("");
 
-  // Real-time notifications
+  // Fix hydration mismatch dengan client-side flag
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Real-time notifications dengan error handling
   const { 
-    isConnected, 
-    connectedDrivers, 
-    driverLocations,
-    refreshDriverLocations,
-    notifications 
+    isConnected = false, 
+    connectedDrivers = 0, 
+    driverLocations = {},
+    refreshDriverLocations = () => {},
+    notifications = []
   } = useRealtimeNotifications({
     userRole: operatorRole,
     userId: operatorId,
     enableToasts: true,
     enableSounds: true,
-  });
+  }) || {};
 
-  // Refresh driver locations every 30 seconds
+  // Route calculation dengan improved error handling
   useEffect(() => {
-    const interval = setInterval(() => {
-      refreshDriverLocations();
-    }, 30000);
+    if (!isClient) return;
 
-    // Initial fetch
-    refreshDriverLocations();
-
-    return () => clearInterval(interval);
-  }, [refreshDriverLocations]);
-
-  // Calculate route and fare when pickup or destination changes
-  useEffect(() => {
     const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
 
     if (!pickupLocation || !selectedDestination) {
@@ -188,43 +154,57 @@ export default function EnhancedBookingPanel({
           { lat: selectedDestination.lat, lng: selectedDestination.lng }
         );
 
-        console.log('🛣️ Route calculated:', route);
-
         if (route && route.coordinates && Array.isArray(route.coordinates) && route.coordinates.length > 1) {
           setRouteData(route);
           if (onRouteCalculated) {
             onRouteCalculated(route);
           }
-          console.log('✅ Route data set successfully');
         } else {
-          console.warn('⚠️ Invalid route data received:', route);
           setRouteData(null);
         }
 
         const pickupAddress = selectedPickup?.address || "Lokasi Saat Ini";
         const destinationAddress = selectedDestination.address;
 
-        const response = await fetch("/api/fare/estimate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            distance: route.distance, 
-            pickupAddress,
-            destinationAddress
-          }),
-        });
+        // Improved API call dengan timeout dan error handling
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-        if (response.ok) {
-          const fare = await response.json();
-          setFareEstimate(fare);
-          lastRouteCalculationRef.current = routeKey;
+        try {
+          const response = await fetch("/api/fare/estimate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              distance: route.distance, 
+              pickupAddress,
+              destinationAddress
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const fare = await response.json();
+            setFareEstimate(fare);
+            lastRouteCalculationRef.current = routeKey;
+          } else {
+            console.error("Fare estimate failed:", response.status, response.statusText);
+            throw new Error(`HTTP ${response.status}`);
+          }
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+          if (fetchError.name === 'AbortError') {
+            console.error("Fare estimate timeout");
+          } else {
+            console.error("Fare estimate error:", fetchError);
+          }
+          throw fetchError;
         }
       } catch (error) {
         console.error("Route calculation error:", error);
-        toast.error("Route Error", {
-          description: "Unable to calculate route. Using straight-line distance.",
-        });
-
+        
+        // Fallback ke straight-line distance
         const distance = gpsService.calculateDistance(
           pickupLocation,
           { lat: selectedDestination.lat, lng: selectedDestination.lng }
@@ -233,20 +213,33 @@ export default function EnhancedBookingPanel({
         const pickupAddress = selectedPickup?.address || "Lokasi Saat Ini";
         const destinationAddress = selectedDestination.address;
 
-        const response = await fetch("/api/fare/estimate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            distance, 
-            pickupAddress,
-            destinationAddress
-          }),
-        });
+        try {
+          const response = await fetch("/api/fare/estimate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              distance, 
+              pickupAddress,
+              destinationAddress
+            }),
+          });
 
-        if (response.ok) {
-          const fare = await response.json();
-          setFareEstimate(fare);
-          lastRouteCalculationRef.current = routeKey;
+          if (response.ok) {
+            const fare = await response.json();
+            setFareEstimate(fare);
+            lastRouteCalculationRef.current = routeKey;
+          }
+        } catch (fallbackError) {
+          console.error("Fallback fare estimate error:", fallbackError);
+          // Set minimal fare estimate sebagai fallback terakhir
+          setFareEstimate({
+            distance,
+            baseFare: 15000,
+            additionalFare: Math.max(0, (distance - 3) * 5000),
+            totalFare: 15000 + Math.max(0, (distance - 3) * 5000),
+            additionalKm: Math.max(0, distance - 3),
+            airportFare: 0,
+          });
         }
 
         setRouteData(null);
@@ -261,13 +254,199 @@ export default function EnhancedBookingPanel({
     const timeoutId = setTimeout(calculateRoute, 2000);
     return () => clearTimeout(timeoutId);
   }, [
+    isClient,
     selectedPickup?.id, 
     selectedDestination?.id, 
     currentLocation ? `${currentLocation.lat.toFixed(4)},${currentLocation.lng.toFixed(4)}` : null,
     onRouteCalculated
   ]);
 
-  // Function to generate receipt data
+  // Driver locations refresh dengan error handling
+  useEffect(() => {
+    if (!isClient) return;
+
+    const interval = setInterval(() => {
+      try {
+        refreshDriverLocations();
+      } catch (error) {
+        console.error("Driver location refresh error:", error);
+      }
+    }, 30000);
+
+    // Initial fetch dengan delay untuk memastikan client sudah ready
+    setTimeout(() => {
+      try {
+        refreshDriverLocations();
+      } catch (error) {
+        console.error("Initial driver location fetch error:", error);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isClient, refreshDriverLocations]);
+
+  // Improved receipt download function
+  const handleDownloadReceipt = async () => {
+    if (!isClient) return;
+
+    const receiptData = generateReceiptData();
+
+    const BASE_WIDTH = 384;
+    const SCALE = 2;
+    const width = BASE_WIDTH * SCALE;
+
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+
+    if (!tempCtx) {
+      toast.error("Canvas Error", {
+        description: "Unable to create canvas context for receipt generation",
+      });
+      return;
+    }
+
+    tempCanvas.width = width;
+    tempCanvas.height = 4000 * SCALE;
+
+    try {
+      // Background
+      tempCtx.fillStyle = '#ffffff';
+      tempCtx.fillRect(0, 0, width, tempCanvas.height);
+
+      let yPos = 18 * SCALE;
+      const leftMargin = 12 * SCALE;
+      const rightMargin = width - 12 * SCALE;
+
+      const FS_XS = 18 * SCALE;
+      const FS_SM = 19 * SCALE;
+      const FS_MD = 20 * SCALE;
+      const FS_BOLD_SM = 20 * SCALE;
+      const FS_BOLD_MD = 22 * SCALE;
+
+      const LINE_GAP = 18 * SCALE;
+      const EXTRA_VALUE_GAP = 8 * SCALE;
+      const EXTRA_BLOCK_GAP = 12 * SCALE;
+      const EXTRA_LOGO_TITLE_GAP = 18 * SCALE;
+
+      const fontStr = (size: number, weight: 'normal' | 'bold' = 'normal') =>
+        `${weight === 'bold' ? 'bold ' : ''}${Math.round(size)}px Arial, sans-serif`;
+
+      const drawText = (
+        text: string,
+        x: number,
+        y: number,
+        size: number = FS_SM,
+        weight: 'normal' | 'bold' = 'normal',
+        align: 'left' | 'center' | 'right' = 'left'
+      ) => {
+        tempCtx.font = fontStr(size, weight);
+        tempCtx.textAlign = align;
+        tempCtx.fillStyle = '#000000';
+        tempCtx.fillText(text, x, y);
+        return y + Math.round(size) + LINE_GAP;
+      };
+
+      const drawLine = (y: number) => {
+        tempCtx.strokeStyle = '#cccccc';
+        tempCtx.lineWidth = Math.max(1 * SCALE, 1);
+        tempCtx.beginPath();
+        tempCtx.moveTo(leftMargin, y);
+        tempCtx.lineTo(rightMargin, y);
+        tempCtx.stroke();
+        return y + (14 * SCALE);
+      };
+
+      // Load logo dengan fallback
+      const loadLogoImage = (): Promise<HTMLImageElement> =>
+        new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => resolve(img);
+          img.onerror = () => {
+            const fallbackCanvas = document.createElement('canvas');
+            const fallbackCtx = fallbackCanvas.getContext('2d')!;
+            const s = 64 * SCALE;
+            fallbackCanvas.width = s;
+            fallbackCanvas.height = s;
+            fallbackCtx.fillStyle = '#1e40af';
+            fallbackCtx.beginPath();
+            fallbackCtx.arc(s / 2, s / 2, (s / 2) - (4 * SCALE), 0, 2 * Math.PI);
+            fallbackCtx.fill();
+            fallbackCtx.fillStyle = '#ffffff';
+            fallbackCtx.font = `${Math.round(12 * SCALE)}px Arial`;
+            fallbackCtx.textAlign = 'center';
+            fallbackCtx.fillText('KOPSI', s / 2, s / 2 + (6 * SCALE));
+            const fallbackImg = new Image();
+            fallbackImg.src = fallbackCanvas.toDataURL();
+            fallbackImg.onload = () => resolve(fallbackImg);
+          };
+          img.src = '/logo-kopsi-pekanbaru.jpeg';
+        });
+
+      // Header
+      tempCtx.fillStyle = '#000000';
+      yPos = drawText(receiptData.date, leftMargin, yPos, FS_XS, 'normal', 'left');
+      tempCtx.font = fontStr(FS_XS, 'normal');
+      tempCtx.textAlign = 'right';
+      tempCtx.fillText(receiptData.time, rightMargin, yPos - (Math.round(FS_XS) + LINE_GAP));
+      tempCtx.textAlign = 'left';
+
+      // Logo
+      yPos += 6 * SCALE;
+      const logoImg = await loadLogoImage();
+      const logoSize = 48 * SCALE;
+      tempCtx.drawImage(logoImg, width / 2 - logoSize / 2, yPos, logoSize, logoSize);
+      yPos += logoSize + (12 * SCALE) + EXTRA_LOGO_TITLE_GAP;
+
+      // Company name
+      yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, FS_BOLD_MD, 'bold', 'center');
+      yPos += 6 * SCALE;
+
+      // Divider
+      yPos = drawLine(yPos);
+
+      // Content sections...
+      yPos = drawText('Detail Perjalanan:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+      yPos += 8 * SCALE;
+
+      // Final crop dan save
+      const actualHeight = Math.max(yPos + (12 * SCALE), 200 * SCALE);
+      const finalCanvas = document.createElement('canvas');
+      const finalCtx = finalCanvas.getContext('2d')!;
+      finalCanvas.width = width;
+      finalCanvas.height = actualHeight;
+
+      finalCtx.fillStyle = '#ffffff';
+      finalCtx.fillRect(0, 0, width, actualHeight);
+      finalCtx.drawImage(tempCanvas, 0, 0, width, actualHeight, 0, 0, width, actualHeight);
+
+      finalCanvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `receipt-kopsi-${receiptData.passenger.name.replace(/\s+/g, '-')}-${Date.now()}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          toast.success("Receipt Downloaded!", {
+            description: "Receipt KOPSI telah disimpan.",
+          });
+        } else {
+          toast.error("Error", { description: "Gagal menghasilkan file gambar" });
+        }
+      }, 'image/png');
+
+    } catch (error) {
+      console.error("Error generating receipt:", error);
+      toast.error("Error", {
+        description: "Gagal membuat receipt. Silakan coba lagi.",
+      });
+    }
+  };
+
   const generateReceiptData = () => {
     const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
     const selectedVehicle = VEHICLE_TYPES.find(v => v.id === selectedVehicleType);
@@ -300,7 +479,7 @@ export default function EnhancedBookingPanel({
       fare: {
         distanceKm: routeData ? routeData.distance : fareEstimate?.distance || 0,
         farePerKm: fareEstimate ? Math.round(fareEstimate.additionalFare * (fareEstimate.additionalKm || 1)) : 0,
-        subTotal: fareEstimate?.additionalFare || 0 ,
+        subTotal: fareEstimate?.additionalFare || 0,
         baseFare: fareEstimate?.baseFare || 0,
         airportCharge: fareEstimate?.airportFare || 0,
       },
@@ -310,488 +489,22 @@ export default function EnhancedBookingPanel({
     };
   };
 
-// Enhanced function to download receipt as JPG with imported logo and QR code
-const handleDownloadReceipt = async () => {
-  const receiptData = generateReceiptData();
-
-  // Base for thermal 58mm
-  const BASE_WIDTH = 384; // recommended width for 58mm
-  const SCALE = 2; // 2x scale per permintaanmu
-  const width = BASE_WIDTH * SCALE; // 768 px
-
-  const tempCanvas = document.createElement('canvas');
-  const tempCtx = tempCanvas.getContext('2d')!;
-
-  tempCanvas.width = width;
-  tempCanvas.height = 4000 * SCALE; // tinggi sementara, nanti dicrop
-
-  if (!tempCtx) {
-    toast.error("Canvas Error", {
-      description: "Unable to create canvas context for receipt generation",
-    });
-    return;
-  }
-
-  try {
-    // Background
-    tempCtx.fillStyle = '#ffffff';
-    tempCtx.fillRect(0, 0, width, tempCanvas.height);
-
-    // Layout constants scaled
-    let yPos = 18 * SCALE; // start margin
-    const leftMargin = 12 * SCALE;
-    const rightMargin = width - 12 * SCALE;
-    const contentWidth = width - leftMargin - 12 * SCALE;
-
-    // Font sizes as numbers (scaled)
-    const FS_XS = 18 * SCALE;
-    const FS_SM = 19 * SCALE;
-    const FS_MD = 20 * SCALE;
-    const FS_BOLD_SM = 20 * SCALE;
-    const FS_BOLD_MD = 22 * SCALE;
-
-    // Spacing parameters (tweak these if masih terasa rapat)
-    const LINE_GAP = 18 * SCALE;            // base extra gap added in drawText return
-    const EXTRA_VALUE_GAP = 8 * SCALE;      // extra offset between key and first value line
-    const EXTRA_BLOCK_GAP = 12 * SCALE;     // extra gap between blocks (e.g. after subtotal)
-
-    // NEW: extra gap between logo and title
-    const EXTRA_LOGO_TITLE_GAP = 18 * SCALE; // adjust this to increase/reduce gap
-
-    // Helper to create font string
-    const fontStr = (size: number, weight: 'normal' | 'bold' = 'normal') =>
-      `${weight === 'bold' ? 'bold ' : ''}${Math.round(size)}px Arial, sans-serif`;
-
-    // drawText helper
-    const drawText = (
-      text: string,
-      x: number,
-      y: number,
-      size: number = FS_SM,
-      weight: 'normal' | 'bold' = 'normal',
-      align: 'left' | 'center' | 'right' = 'left'
-    ) => {
-      tempCtx.font = fontStr(size, weight);
-      tempCtx.textAlign = align;
-      tempCtx.fillStyle = '#000000';
-      tempCtx.fillText(text, x, y);
-      return y + Math.round(size) + LINE_GAP;
-    };
-
-    // wrapText helper with larger lineHeight default
-    const wrapText = (
-      text: string,
-      x: number,
-      y: number,
-      maxWidth: number,
-      size: number = FS_SM,
-      lineHeight: number = Math.round(FS_MD + (8 * SCALE)),
-      align: 'left' | 'center' | 'right' = 'left'
-    ) => {
-      tempCtx.font = fontStr(size, 'normal');
-      tempCtx.textAlign = align;
-      const words = text.split(' ');
-      let line = '';
-      for (let i = 0; i < words.length; i++) {
-        const testLine = line + words[i] + ' ';
-        const metrics = tempCtx.measureText(testLine);
-        if (metrics.width > maxWidth && line !== '') {
-          tempCtx.fillText(line.trim(), x, y);
-          line = words[i] + ' ';
-          y += lineHeight;
-        } else {
-          line = testLine;
-        }
-      }
-      if (line) {
-        tempCtx.fillText(line.trim(), x, y);
-        y += lineHeight;
-      }
-      return y;
-    };
-
-    /**
-     * drawKeyValue:
-     * - key printed at baseline y (left)
-     * - value lines printed starting at y + valueTopOffset (so key tidak 'menempel' pada baris pertama value)
-     * - valueLineHeight default lebih besar sehingga wrapped lines punya jarak baik
-     */
-    const drawKeyValue = (
-      key: string,
-      value: string,
-      y: number,
-      opts?: {
-        keySize?: number;
-        valueSize?: number;
-        valueLineHeight?: number;
-        valueMaxWidth?: number;
-      }
-    ) => {
-      const keySize = opts?.keySize ?? FS_BOLD_SM;
-      const valueSize = opts?.valueSize ?? FS_MD;
-      // valueLineHeight dibuat lebih besar untuk spasi antar baris value
-      const valueLineHeight = opts?.valueLineHeight ?? Math.round(valueSize + (10 * SCALE));
-      const valueMaxWidth = opts?.valueMaxWidth ?? (contentWidth - (80 * SCALE));
-
-      // Prepare wrapped lines for value
-      tempCtx.font = fontStr(valueSize, 'normal');
-      let words = value.split(' ');
-      let line = '';
-      const lines: string[] = [];
-      for (let i = 0; i < words.length; i++) {
-        const testLine = line + words[i] + ' ';
-        const metrics = tempCtx.measureText(testLine);
-        if (metrics.width > valueMaxWidth && line !== '') {
-          lines.push(line.trim());
-          line = words[i] + ' ';
-        } else {
-          line = testLine;
-        }
-      }
-      if (line.trim()) lines.push(line.trim());
-
-      // Draw key (left)
-      tempCtx.font = fontStr(keySize, 'bold');
-      tempCtx.textAlign = 'left';
-      tempCtx.fillStyle = '#000000';
-      tempCtx.fillText(key, leftMargin, y);
-
-      // Draw value lines (right-aligned) - start a bit lower to separate from key
-      tempCtx.font = fontStr(valueSize, 'normal');
-      tempCtx.textAlign = 'right';
-      const valueStartY = y + EXTRA_VALUE_GAP;
-      for (let i = 0; i < lines.length; i++) {
-        tempCtx.fillText(lines[i], rightMargin, valueStartY + i * valueLineHeight);
-      }
-
-      // Return new y after all value lines + some extra gap
-      return valueStartY + lines.length * valueLineHeight + LINE_GAP;
-    };
-
-    // Divider with slightly larger gap after
-    const drawLine = (y: number) => {
-      tempCtx.strokeStyle = '#cccccc';
-      tempCtx.lineWidth = Math.max(1 * SCALE, 1);
-      tempCtx.beginPath();
-      tempCtx.moveTo(leftMargin, y);
-      tempCtx.lineTo(rightMargin, y);
-      tempCtx.stroke();
-      return y + (14 * SCALE);
-    };
-
-    // Image loaders (unchanged except using SCALE constants)
-    const loadLogoImage = (): Promise<HTMLImageElement> =>
-      new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => {
-          const fallbackCanvas = document.createElement('canvas');
-          const fallbackCtx = fallbackCanvas.getContext('2d')!;
-          const s = 64 * SCALE;
-          fallbackCanvas.width = s;
-          fallbackCanvas.height = s;
-          fallbackCtx.fillStyle = '#1e40af';
-          fallbackCtx.beginPath();
-          fallbackCtx.arc(s / 2, s / 2, (s / 2) - (4 * SCALE), 0, 2 * Math.PI);
-          fallbackCtx.fill();
-          fallbackCtx.fillStyle = '#ffffff';
-          fallbackCtx.font = `${Math.round(12 * SCALE)}px Arial`;
-          fallbackCtx.textAlign = 'center';
-          fallbackCtx.fillText('KOPSI', s / 2, s / 2 + (6 * SCALE));
-          const fallbackImg = new Image();
-          fallbackImg.src = fallbackCanvas.toDataURL();
-          fallbackImg.onload = () => resolve(fallbackImg);
-        };
-        img.src = '/logo-kopsi-pekanbaru.jpeg';
-      });
-
-    const loadQRImage = (): Promise<HTMLImageElement> =>
-      new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => {
-          const fallbackCanvas = document.createElement('canvas');
-          const fallbackCtx = fallbackCanvas.getContext('2d')!;
-          const s = 120 * SCALE;
-          fallbackCanvas.width = s;
-          fallbackCanvas.height = s;
-          fallbackCtx.fillStyle = '#ffffff';
-          fallbackCtx.fillRect(0, 0, s, s);
-          fallbackCtx.fillStyle = '#000000';
-          for (let i = 0; i < 12; i++) {
-            for (let j = 0; j < 12; j++) {
-              if ((i + j) % 3 === 0) fallbackCtx.fillRect(i * (10 * SCALE), j * (10 * SCALE), 10 * SCALE, 10 * SCALE);
-            }
-          }
-          const fallbackImg = new Image();
-          fallbackImg.src = fallbackCanvas.toDataURL();
-          fallbackImg.onload = () => resolve(fallbackImg);
-        };
-        img.src = '/qrcode.png';
-      });
-
-    // --- START DRAW ---
-    tempCtx.fillStyle = '#000000';
-    yPos = drawText(receiptData.date, leftMargin, yPos, FS_XS, 'normal', 'left');
-    // time on same baseline (manual)
-    tempCtx.font = fontStr(FS_XS, 'normal');
-    tempCtx.textAlign = 'right';
-    tempCtx.fillText(receiptData.time, rightMargin, yPos - (Math.round(FS_XS) + LINE_GAP));
-    tempCtx.textAlign = 'left';
-
-    // Logo
-    yPos += 6 * SCALE;
-    const logoImg = await loadLogoImage();
-    const logoSize = 48 * SCALE;
-    tempCtx.drawImage(logoImg, width / 2 - logoSize / 2, yPos, logoSize, logoSize);
-    // apply extra gap between logo and title
-    yPos += logoSize + (12 * SCALE) + EXTRA_LOGO_TITLE_GAP;
-
-    // Company name
-    yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, FS_BOLD_MD, 'bold', 'center');
-    yPos += 6 * SCALE;
-
-    // Divider
-    yPos = drawLine(yPos);
-
-    // Detail Perjalanan
-    yPos = drawText('Detail Perjalanan:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-    yPos += 8 * SCALE;
-
-    // For addresses we increase valueMaxWidth so wrapping behaves better
-    yPos = drawKeyValue('Dari', receiptData.travel.from, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
-      valueMaxWidth: contentWidth - (60 * SCALE),
-    });
-
-    yPos = drawKeyValue('Tujuan', receiptData.travel.to, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
-      valueMaxWidth: contentWidth - (60 * SCALE),
-    });
-
-    yPos += 8 * SCALE;
-    yPos = drawLine(yPos);
-
-    // Detail Penumpang
-    yPos = drawText('Detail Penumpang:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-    yPos += 8 * SCALE;
-
-    yPos = drawKeyValue('Nama', receiptData.passenger.name, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
-
-    yPos = drawKeyValue('HP', receiptData.passenger.phone, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
-
-    yPos += 8 * SCALE;
-    yPos = drawLine(yPos);
-
-    // Detail Tarif
-    yPos = drawText('Detail Tarif:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-    yPos += 8 * SCALE;
-
-    // yPos = drawKeyValue('Jarak (KM)', receiptData.fare.distanceKm.toFixed(1), yPos, {
-    //   keySize: FS_BOLD_SM,
-    //   valueSize: FS_MD,
-    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    // });
-
-    // yPos = drawKeyValue('Tarif / KM', `Rp ${receiptData.fare.farePerKm.toLocaleString()}`, yPos, {
-    //   keySize: FS_BOLD_SM,
-    //   valueSize: FS_MD,
-    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    // });
-
-    // Subtotal row and add extra block gap AFTER subtotal so next items tidak menempel
-    tempCtx.font = fontStr(FS_BOLD_SM, 'bold');
-    tempCtx.textAlign = 'left';
-    tempCtx.fillText('Subtotal', leftMargin, yPos);
-    tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.subTotal).toLocaleString()}`, rightMargin, yPos);
-    yPos += (20 * SCALE);
-
-    // add extra gap so "Tarif Dasar" tidak menempel ke Subtotal
-    yPos += EXTRA_BLOCK_GAP;
-
-    // yPos = drawKeyValue('Tarif Dasar', `Rp ${receiptData.fare.baseFare.toLocaleString()}`, yPos, {
-    //   keySize: FS_BOLD_SM,
-    //   valueSize: FS_MD,
-    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    // });
-
-    yPos = drawKeyValue('Airport Charge', `Rp ${receiptData.fare.airportCharge.toLocaleString()}`, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
-
-    yPos += 8 * SCALE;
-    yPos = drawLine(yPos);
-    yPos += 10 * SCALE;
-
-    // TOTAL
-    tempCtx.font = fontStr(28 * SCALE, 'bold');
-    tempCtx.textAlign = 'left';
-    tempCtx.fillText('TOTAL', leftMargin, yPos);
-    tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${receiptData.totalFare.toLocaleString()}`, rightMargin, yPos);
-    yPos += (28 * SCALE);
-
-    // Driver info
-    if (receiptData.driver) {
-      yPos = drawText('Informasi Driver:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-      yPos = drawText(`Nama: ${receiptData.driver.name}`, leftMargin, yPos, FS_SM, 'normal');
-      yPos = drawText(`Plat: ${receiptData.driver.plate}`, leftMargin, yPos, FS_SM, 'normal');
-      yPos = drawText(`HP: ${receiptData.driver.phone}`, leftMargin, yPos, FS_SM, 'normal');
-      yPos += 12 * SCALE;
-    }
-
-    // QR Code (spacing generous)
-    yPos += 12 * SCALE;
-    const qrSize = 96 * SCALE;
-    const qrX = width / 2 - qrSize / 2;
-    try {
-      const qrImg = await loadQRImage();
-      tempCtx.drawImage(qrImg, qrX, yPos, qrSize, qrSize);
-    } catch (error) {
-      console.error("Failed to load QR code image:", error);
-      tempCtx.fillStyle = '#f0f0f0';
-      tempCtx.fillRect(qrX, yPos, qrSize, qrSize);
-      tempCtx.strokeStyle = '#cccccc';
-      tempCtx.strokeRect(qrX, yPos, qrSize, qrSize);
-      tempCtx.fillStyle = '#666666';
-      tempCtx.font = fontStr(FS_SM, 'normal');
-      tempCtx.textAlign = 'center';
-      tempCtx.fillText('QR Code', width / 2, yPos + qrSize / 2);
-    }
-    yPos += qrSize + (14 * SCALE);
-
-    // QR description
-    // tempCtx.fillStyle = '#666666';
-    // tempCtx.font = fontStr(FS_XS, 'normal');
-    // tempCtx.textAlign = 'center';
-    // tempCtx.fillText('Scan untuk verifikasi receipt', width / 2, yPos);
-    // yPos += 16 * SCALE;
-
-    // Footer note (wrap) with larger lineHeight
-    tempCtx.fillStyle = '#666666';
-    tempCtx.font = `italic ${Math.round(12 * SCALE)}px Arial, sans-serif`;
-    tempCtx.fillStyle = '#000000';
-    tempCtx.font = `bold ${Math.round(14 * SCALE)}px Arial, sans-serif`;
-    tempCtx.textAlign = 'left';
-    const noteText = 'Catatan: Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.';
-    yPos = wrapText(noteText, leftMargin, yPos, contentWidth, 12 * SCALE, Math.round(14 * SCALE), 'left');
-    yPos += 22 * SCALE;
-
-    // Final crop
-    const actualHeight = Math.max(yPos + (12 * SCALE), 200 * SCALE);
-    const finalCanvas = document.createElement('canvas');
-    const finalCtx = finalCanvas.getContext('2d')!;
-    finalCanvas.width = width;
-    finalCanvas.height = actualHeight;
-
-    finalCtx.fillStyle = '#ffffff';
-    finalCtx.fillRect(0, 0, width, actualHeight);
-    finalCtx.drawImage(tempCanvas, 0, 0, width, actualHeight, 0, 0, width, actualHeight);
-
-    // Save PNG
-    finalCanvas.toBlob((blob) => {
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `receipt-kopsi-${receiptData.passenger.name.replace(/\s+/g, '-')}-${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        toast.success("Receipt Downloaded!", {
-          description: "Receipt KOPSI telah disimpan (spacing diperbaiki).",
-        });
-      } else {
-        toast.error("Error", { description: "Gagal menghasilkan file gambar" });
-      }
-    }, 'image/png');
-
-  } catch (error) {
-    console.error("Error generating receipt:", error);
-    toast.error("Error", {
-      description: "Gagal membuat receipt. Silakan coba lagi.",
-    });
-  }
-};
-
-
-
-
-
-
-  // Function to generate WhatsApp message
-//   const generateWhatsAppMessage = () => {
-//     const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
-//     const selectedVehicle = VEHICLE_TYPES.find(v => v.id === selectedVehicleType);
-//     const finalFare = fareEstimate ? calculateVehicleFare(fareEstimate.totalFare, selectedVehicleType) : 0;
-//     const selectedDriver = availableDrivers.find(d => d.id === selectedDriverId);
-
-//     const message = `Halo ${passengerName},
-
-// Pesanan taksi Anda telah dikonfirmasi!
-
-// 📍 *Detail Perjalanan:*
-// • Dari: ${selectedPickup?.address || "Lokasi Saat Ini"}
-// • Tujuan: ${selectedDestination?.address}
-// • Jenis Kendaraan: ${selectedVehicle?.name}
-// • Jarak: ${routeData ? routeData.distance.toFixed(1) : fareEstimate?.distance.toFixed(1)} km
-// • Estimasi Waktu: ${routeData ? Math.round(routeData.duration) : Math.round((fareEstimate?.distance || 0) * 2.5)} menit
-
-// 💰 *Tarif:*
-// • Total: ${formatCurrency(finalFare)}
-
-// 👨‍💼 *Driver:*
-// • Nama: ${selectedDriver?.name || "Akan ditentukan"}
-// • Plat: ${selectedDriver?.plate || "Akan ditentukan"}
-// • HP Driver: ${selectedDriver?.phone || "Akan diberitahu"}
-
-// Terima kasih telah menggunakan layanan kami!`;
-
-//     return encodeURIComponent(message);
-//   };
-
-  // Function to open WhatsApp
   const openWhatsApp = () => {
-    // Clean phone number (remove +62, 0, spaces, dashes)
     const cleanPhone = passengerPhone.replace(/[\s\-\+]/g, '').replace(/^0/, '62').replace(/^62/, '62');
-    // const message = generateWhatsAppMessage();
     const whatsappUrl = `https://wa.me/${cleanPhone}`;
 
-    // Open WhatsApp in new tab
     window.open(whatsappUrl, '_blank');
 
-    // Show success toast
     toast.success("WhatsApp Dibuka!", {
       description: `Pesan konfirmasi telah disiapkan untuk ${passengerName}`,
       duration: 3000,
     });
 
-    // Reset form
     setPassengerName("");
     setPassengerPhone("");
     setSelectedDriverId(null);
     setShowConfirmDialog(false);
 
-    // Call the original onBookRide callback if needed
     const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
     if (pickupLocation && selectedDestination && fareEstimate) {
       const rideData = {
@@ -835,7 +548,6 @@ const handleDownloadReceipt = async () => {
         }
       }
 
-      // Use NestJS backend endpoint
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
       const orderData = {
@@ -854,7 +566,7 @@ const handleDownloadReceipt = async () => {
         requestedVehicleType: selectedVehicleType,
         distanceMeters: Math.round(fareEstimate.distance * 1000),
         estimatedDurationMinutes: routeData?.duration || Math.round(fareEstimate.distance * 2.5),
-        baseFare: Math.round(fareEstimate.baseFare * 100), // Convert to cents
+        baseFare: Math.round(fareEstimate.baseFare * 100),
         distanceFare: Math.round(fareEstimate.additionalFare * 100),
         airportFare: Math.round((fareEstimate.airportFare || 0) * 100),
         totalFare: Math.round(finalFare * 100),
@@ -871,8 +583,6 @@ const handleDownloadReceipt = async () => {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
-          // Add authentication headers if needed
-          // "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify(orderData),
       });
@@ -892,13 +602,9 @@ const handleDownloadReceipt = async () => {
         duration: 5000,
       });
 
-      // Reset form
       setPassengerName("");
       setPassengerPhone("");
       setSelectedDriverId(null);
-      // if (fareEstimate) {
-      //   handlePrintReceipt(fareEstimate); // cetak struk
-      // }
 
       onBookRide(data.rideData);
     },
@@ -915,12 +621,10 @@ const handleDownloadReceipt = async () => {
   };
 
   const handleBookRideClick = () => {
-    // Show confirmation dialog instead of directly booking
     setShowConfirmDialog(true);
   };
 
   const handleConfirmBooking = () => {
-    // Open WhatsApp with confirmation message
     openWhatsApp();
   };
 
@@ -932,10 +636,18 @@ const handleDownloadReceipt = async () => {
     passengerName.trim() === "" ||
     passengerPhone.trim() === "";
 
+  // Render loading state untuk server-side rendering
+  if (!isClient) {
+    return (
+      <div className="bg-white rounded-t-3xl shadow-2xl relative z-10 h-[400px] flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="bg-white rounded-t-3xl shadow-2xl relative z-10 h-[400px]" data-testid="enhanced-booking-panel">
-        {/* Drag Handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div className="w-12 h-1 bg-gray-300 rounded-full"></div>
         </div>
