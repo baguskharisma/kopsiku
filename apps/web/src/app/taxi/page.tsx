@@ -155,7 +155,7 @@ export default function TaxiAppMainPage() {
               selectedPickup={selectedPickup}
               onDestinationClick={() => setShowLocationPicker(true)}
               onPickupClick={() => setShowPickupPicker(true)}
-              onBookRide={handleBookRide}
+              // onBookRide={handleBookRide}
               onRouteCalculated={handleRouteCalculated} 
               operatorId={""} 
               operatorRole={"ADMIN"}              
