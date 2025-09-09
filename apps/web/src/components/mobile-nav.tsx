@@ -1,12 +1,14 @@
 import Link from "next/link"
 import Image from "next/image"
-import { Car, Ticket, Package, User, Phone, Home, LogIn } from "lucide-react"
+import { Car, Ticket, Package, User, Phone, Home, LogIn, Coins } from "lucide-react"
 import { LogoutButton } from "./auth/logout-button"
 import { useAuth } from "@/lib/use-auth"
 import { Button } from "@/components/ui/button"
+import { useCoins } from "@/hooks/use-coins"
 
 export function MobileNav() {
   const { isAuthenticated, isLoading } = useAuth()
+  const { data: coins, isLoading: coinsLoading, isError } = useCoins()
 
   return (
     <div className="flex flex-col space-y-3 mt-3 ms-3">
@@ -20,6 +22,21 @@ export function MobileNav() {
         />
         <span className="font-bold">KOPSI Pekanbaru</span>
       </Link>
+
+      {isAuthenticated && (
+        <div className="mb-4">
+          {coinsLoading ? (
+        <div className="text-sm">Memuat koin…</div>
+      ) : isError ? (
+        <div className="text-sm text-red-600">Gagal ambil koin</div>
+      ) : (
+        <div className="flex items-center space-x-2 text-green-500 font-semibold">
+          <Coins className="h-5 w-5" />
+          <span>{typeof coins === "number" ? coins.toLocaleString("id-ID") : "0"} coins</span>
+        </div>
+      )}
+        </div>
+      )}
 
       <Link
         href="/"

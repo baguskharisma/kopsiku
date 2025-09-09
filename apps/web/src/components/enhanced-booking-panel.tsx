@@ -1,16 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { Car, MapPin, Clock, Route, Users, Wifi, WifiOff, MessageCircle, Download } from "lucide-react";
+import { Car, MapPin, Route, Users, Wifi, WifiOff, MessageCircle, Download, Check, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
-import { gpsService, type Coordinates, type RouteResult } from "@/lib/gps-service";
-import { VEHICLE_TYPES, calculateVehicleFare } from "@/lib/vehicle-types";
-import { formatCurrency } from "@/lib/format-currency";
-import { useRealtimeNotifications } from "@/hooks/use-realtime-notifications";
-import type { Location } from "@/lib/types";
-import type { VehicleType } from "@prisma/client";
 import { ScrollArea } from "./ui/scroll-area";
 import {
   AlertDialog,
@@ -22,73 +14,38 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import { gpsService, type Coordinates, type RouteResult } from "@/lib/gps-service";
+import { VEHICLE_TYPES, calculateVehicleFare } from "@/lib/vehicle-types";
+import { formatCurrency } from "@/lib/format-currency";
+import { useRealtimeNotifications } from "@/hooks/use-realtime-notifications";
+import { calculateFare } from "@/lib/fare-calculator";
+import type { Location } from "@/lib/types";
+import type { VehicleType } from "@prisma/client";
 
+// Types
 interface DriverOption {
   id: string;
   name: string;
   plate: string;
   phone: string;
   vehicleType?: VehicleType;
+  fleetId?: string;
+  rating?: number;
+  status?: string;
+  currentLocation?: {
+    lat?: number | null;
+    lng?: number | null;
+  };
 }
-
-// const handlePrintReceipt = async (fare: any) => {
-//   console.log("ðŸ–¨ï¸ Sending receipt to backend:", fare);
-//   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
-//   try {
-//     const res = await fetch(`${backendUrl}/api/v1/printer/print`, {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({
-//         distance: fare.distance,
-//         duration: fare?.duration || 0,
-//         baseFare: fare.baseFare,
-//         additionalFare: fare.additionalFare,
-//         airportFare: fare.airportFare,
-//         totalFare: fare.totalFare,
-//       }),
-//     });
-//     console.log("ðŸ–¨ï¸ Print response:", res.status);
-//     const data = await res.json().catch(() => ({}));
-//     console.log("ðŸ–¨ï¸ Print response body:", data);
-//   } catch (err) {
-//     console.error("ðŸ–¨ï¸ Print error:", err);
-//   }
-// };
-
-const DEFAULT_DRIVERS: DriverOption[] = [
-  { id: 'BM-1856-QU', name: 'Endrizal', plate: 'BM 1856 QU', phone: '08126850120' },
-  { id: 'BM-1858-QU', name: 'Syamsuddin', plate: 'BM 1858 QU', phone: '081270432500' },
-  { id: 'BM-1860-QU', name: 'Safrizal', plate: 'BM 1860 QU', phone: '085274658457' },
-  { id: 'BM-1862-QU', name: 'Mardianto', plate: 'BM 1862 QU', phone: '088279086838' },
-  { id: 'BM-1863-QU', name: 'Syafrizal', plate: 'BM 1863 QU', phone: '081378334227' },
-  { id: 'BM-1865-QU', name: 'Hotler Sibagariang', plate: 'BM 1865 QU', phone: '081371573112' },
-  { id: 'BM-1394-JU', name: 'Zalmi', plate: 'BM 1394 JU', phone: '085351138940' },
-  { id: 'BM-1399-JU', name: 'Jhon Kuntan', plate: 'BM 1399 JU', phone: '081364476663' },
-  { id: 'BM-1902-QU', name: 'Ari Brewok', plate: 'BM 1902 QU', phone: '' },
-  { id: 'BM-1904-QU', name: 'Yusnedi', plate: 'BM 1904 QU', phone: '08127658449' },
-  { id: 'BM-1905-QU', name: 'Defrizal', plate: 'BM 1905 QU', phone: '08127634408' },
-  { id: 'BM-1906-QU', name: 'Jaya Adha', plate: 'BM 1906 QU', phone: '085265456961' },
-  { id: 'BM-1907-QU', name: 'Yakub Efendi', plate: 'BM 1907 QU', phone: '085264015429' },
-  { id: 'BM-1924-QU', name: 'Ridwan', plate: 'BM 1924 QU', phone: '085271387541' },
-  { id: 'BM-1930-QU', name: 'Hendrizal', plate: 'BM 1930 QU', phone: '085194379507' },
-  { id: 'BM-1933-QU', name: 'Azwir', plate: 'BM 1933 QU', phone: '085278131464' },
-  { id: 'BM-1955-QU', name: 'Harry Yanson Hutabarat', plate: 'BM 1955 QU', phone: '085271543750' },
-  { id: 'BM-1956-QU', name: 'Sarmi', plate: 'BM 1956 QU', phone: '081371574888' },
-  { id: 'BM-1957-QU', name: 'Nofrizal', plate: 'BM 1957 QU', phone: '085274237100' },
-  { id: 'BM-1404-JU', name: 'Adam Cahyadi', plate: 'BM 1404 JU', phone: '085763579380' },
-];
-
 
 interface EnhancedBookingPanelProps {
   currentLocation: Coordinates | null;
   selectedDestination?: Location | null;
   onDestinationClick: () => void;
   onPickupClick: () => void;
-  onBookRide: (rideData: any) => void;
   onRouteCalculated?: (route: RouteResult) => void;
   selectedPickup?: Location | null;
-  availableDrivers?: DriverOption[];
-  // Real-time props
   operatorId: string;
   operatorRole: 'ADMIN' | 'SUPER_ADMIN';
 }
@@ -102,39 +59,82 @@ interface FareEstimate {
   airportFare?: number;
 }
 
+// Helper Functions
+function buildFarePayload(
+  distanceKm: number,
+  pickupAddress: string,
+  destinationAddress: string,
+  selectedVehicleType: VehicleType
+) {
+  if (distanceKm <= 0) {
+    throw new Error("Invalid distance for fare calculation");
+  }
+
+  const fareResult = calculateFare(distanceKm, pickupAddress, destinationAddress);
+
+  const actualBaseFare = fareResult.baseFare;
+  const actualDistanceFare = fareResult.additionalFare - fareResult.baseFare;
+  const actualAirportFare = fareResult.airportFare;
+  const actualTotalFare = fareResult.totalFare;
+
+  // Convert to cents
+  const baseCents = Math.round(actualBaseFare * 100);
+  const distanceCents = Math.round(actualDistanceFare * 100);
+  const airportCents = Math.round(actualAirportFare * 100);
+  const totalCents = Math.round(actualTotalFare * 100);
+
+  // Apply vehicle type multiplier
+  const finalFareCurrency = calculateVehicleFare(actualTotalFare, selectedVehicleType);
+  const finalFareCents = Math.round(finalFareCurrency * 100);
+
+  return {
+    baseCents,
+    distanceCents,
+    airportCents,
+    totalCents,
+    finalFareCurrency,
+    finalFareCents,
+    farePerKm: fareResult.farePerKm,
+    additionalKm: fareResult.additionalKm,
+  };
+}
+
 export default function EnhancedBookingPanel({ 
   currentLocation, 
   selectedDestination, 
   onDestinationClick, 
   onPickupClick,
-  onBookRide,
   onRouteCalculated,
   selectedPickup,
-  availableDrivers = DEFAULT_DRIVERS,
   operatorId,
   operatorRole,
 }: EnhancedBookingPanelProps) {
+  // State Management
   const [selectedVehicleType, setSelectedVehicleType] = useState<VehicleType>("ECONOMY");
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
   const [routeData, setRouteData] = useState<RouteResult | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const lastRouteCalculationRef = useRef<string>("");
 
-  // Passenger inputs
+  const [availableDrivers, setAvailableDrivers] = useState<DriverOption[]>([]);
+  const [loadingDrivers, setLoadingDrivers] = useState(false);
+
   const [passengerName, setPassengerName] = useState<string>("");
   const [passengerPhone, setPassengerPhone] = useState<string>("");
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
-  // Confirmation dialog state
+  // Dialog states
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showActionDialog, setShowActionDialog] = useState(false);
+  const [driverMessageSent, setDriverMessageSent] = useState(false);
+  const [customerMessageSent, setCustomerMessageSent] = useState(false);
+  const [lastOrderData, setLastOrderData] = useState<any>(null);
 
   // Real-time notifications
   const { 
     isConnected, 
     connectedDrivers, 
-    driverLocations,
     refreshDriverLocations,
-    notifications 
   } = useRealtimeNotifications({
     userRole: operatorRole,
     userId: operatorId,
@@ -142,19 +142,172 @@ export default function EnhancedBookingPanel({
     enableSounds: true,
   });
 
-  // Refresh driver locations every 30 seconds
+  // Helper Functions
+  const computeDurationEstimate = (routeData: RouteResult | null, fareEstimate: FareEstimate | null) => {
+    const routeDuration = routeData && typeof routeData.duration === 'number' && !Number.isNaN(routeData.duration)
+      ? Math.round(routeData.duration)
+      : null;
+
+    if (routeDuration !== null) {
+      return routeDuration;
+    }
+
+    const distanceKm = fareEstimate && typeof fareEstimate.distance === 'number' && !Number.isNaN(fareEstimate.distance)
+      ? fareEstimate.distance
+      : 0;
+
+    return Math.max(1, Math.round(distanceKm * 2.5));
+  };
+
+  const getVehiclePrice = (basePrice: number, vehicleId: VehicleType) => {
+    return calculateVehicleFare(basePrice, vehicleId);
+  };
+
+  const generateReceiptData = () => {
+    const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
+    const selectedVehicle = VEHICLE_TYPES.find(v => v.id === selectedVehicleType);
+    const finalFare = fareEstimate ? calculateVehicleFare(fareEstimate.totalFare, selectedVehicleType) : 0;
+    const selectedDriver = availableDrivers.find(d => d.id === selectedDriverId);
+
+    const currentDate = new Date();
+    const dateString = currentDate.toLocaleDateString('id-ID', { 
+      day: 'numeric', 
+      month: 'long', 
+      year: 'numeric' 
+    });
+    const timeString = currentDate.toLocaleTimeString('id-ID', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    return {
+      date: dateString,
+      time: timeString,
+      travel: {
+        from: selectedPickup?.display_name || selectedPickup?.name || "Lokasi Saat Ini",
+        to: selectedDestination?.display_name || selectedDestination?.name || "Lokasi Saat Ini",
+      },
+      passenger: {
+        name: passengerName,
+        phone: passengerPhone,
+      },
+      fare: {
+        distanceKm: routeData ? routeData.distance : fareEstimate?.distance || 0,
+        farePerKm: fareEstimate ? Math.round(fareEstimate.additionalFare * (fareEstimate.additionalKm || 1)) : 0,
+        subTotal: fareEstimate?.additionalFare || 0,
+        baseFare: fareEstimate?.baseFare || 0,
+        airportCharge: fareEstimate?.airportFare || 0,
+      },
+      driver: selectedDriver,
+      vehicleType: selectedVehicle?.name,
+      totalFare: finalFare,
+    };
+  };
+
+  const generateDriverWhatsAppMessage = (orderData: any, tripDetails: any) => {
+    const currentDate = new Date();
+    const timeString = currentDate.toLocaleTimeString('id-ID', { 
+      hour: '2-digit', 
+      minute: '2-digit'
+    });
+
+    return `*ORDER BARU - KOPSI PEKANBARU*
+${timeString}
+
+Selamat! Anda mendapat order baru.
+
+*DETAIL ORDER*
+• No. Order: ${orderData.orderNumber}
+• Status: DRIVER_ASSIGNED
+• Jenis: ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name}
+
+*PENUMPANG*
+• Nama: ${tripDetails.passengerName}
+• HP: ${tripDetails.passengerPhone}
+
+*PERJALANAN*
+• Dari: ${tripDetails.pickupAddress}
+• Tujuan: ${tripDetails.dropoffAddress}
+• Jarak: ${routeData ? routeData.distance.toFixed(1) : fareEstimate?.distance.toFixed(1)} km
+• Estimasi: ${routeData ? Math.round(routeData.duration) : Math.round((fareEstimate?.distance || 0) * 2.5)} menit
+
+*TARIF*
+• Total: ${formatCurrency(calculateVehicleFare(fareEstimate?.totalFare || 0, selectedVehicleType))}
+• Pembayaran: Tunai
+
+Semoga perjalanan lancar!
+*KOPSI PEKANBARU*`;
+  };
+
+  // API Functions
+  const fetchAvailableDrivers = async (vehicleType?: VehicleType) => {
+    setLoadingDrivers(true);
+    try {
+      const response = await fetch(`/api/drivers?vehicleType=${vehicleType || 'ECONOMY'}`);
+      
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && Array.isArray(result.data)) {
+          const drivers = result.data.map((driver: any) => ({
+            id: driver.id,
+            name: driver.name,
+            plate: driver.plate || driver.fleets?.[0]?.plateNumber || 'N/A',
+            phone: driver.phone,
+            vehicleType: driver.vehicleType || driver.fleets?.[0]?.vehicleType,
+            fleetId: driver.fleetId || driver.fleets?.[0]?.id,
+            rating: driver.rating || 0,
+            status: driver.status || 'UNKNOWN',
+            currentLocation: driver.currentLocation,
+          }));
+          
+          setAvailableDrivers(drivers);
+
+          if (drivers.length === 0) {
+            toast.info("Debug Info", {
+              description: `Backend mengembalikan 0 drivers untuk ${vehicleType}. Cek console untuk detail.`,
+              duration: 6000,
+            });
+          } else {
+            toast.success("Drivers Loaded", {
+              description: `${drivers.length} driver ditemukan`,
+              duration: 2000,
+            });
+          }
+        } else {
+          toast.error("Error", {
+            description: "Format response API tidak valid",
+          });
+        }
+      } else {
+        toast.error("Error", {
+          description: `API error: ${response.status}`,
+        });
+      }
+    } catch (error) {
+      toast.error("Error", {
+        description: "Network error saat memuat driver",
+      });
+    } finally {
+      setLoadingDrivers(false);
+    }
+  };
+
+  // Effects
+  useEffect(() => {
+    fetchAvailableDrivers(selectedVehicleType);
+  }, [selectedVehicleType]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       refreshDriverLocations();
     }, 30000);
 
-    // Initial fetch
     refreshDriverLocations();
-
     return () => clearInterval(interval);
   }, [refreshDriverLocations]);
 
-  // Calculate route and fare when pickup or destination changes
   useEffect(() => {
     const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
 
@@ -181,23 +334,17 @@ export default function EnhancedBookingPanel({
     const calculateRoute = async () => {
       setIsCalculatingRoute(true);
       try {
-        console.log('ðŸ—ºï¸ Calculating route from:', pickupLocation, 'to:', { lat: selectedDestination.lat, lng: selectedDestination.lng });
-
         const route = await gpsService.getRoute(
           pickupLocation,
           { lat: selectedDestination.lat, lng: selectedDestination.lng }
         );
-
-        console.log('ðŸ›£ï¸ Route calculated:', route);
 
         if (route && route.coordinates && Array.isArray(route.coordinates) && route.coordinates.length > 1) {
           setRouteData(route);
           if (onRouteCalculated) {
             onRouteCalculated(route);
           }
-          console.log('âœ… Route data set successfully');
         } else {
-          console.warn('âš ï¸ Invalid route data received:', route);
           setRouteData(null);
         }
 
@@ -267,674 +414,556 @@ export default function EnhancedBookingPanel({
     onRouteCalculated
   ]);
 
-  // Function to generate receipt data
-  const generateReceiptData = () => {
-    const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
-    const selectedVehicle = VEHICLE_TYPES.find(v => v.id === selectedVehicleType);
-    const finalFare = fareEstimate ? calculateVehicleFare(fareEstimate.totalFare, selectedVehicleType) : 0;
-    const selectedDriver = availableDrivers.find(d => d.id === selectedDriverId);
+  // Enhanced function to download receipt as PNG
+  const handleDownloadReceipt = async () => {
+    const receiptData = generateReceiptData();
 
-    const currentDate = new Date();
-    const dateString = currentDate.toLocaleDateString('id-ID', { 
-      day: 'numeric', 
-      month: 'long', 
-      year: 'numeric' 
-    });
-    const timeString = currentDate.toLocaleTimeString('id-ID', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      timeZoneName: 'short'
-    });
+    const BASE_WIDTH = 384;
+    const SCALE = 2;
+    const width = BASE_WIDTH * SCALE;
 
-    return {
-      date: dateString,
-      time: timeString,
-      travel: {
-        from: selectedPickup?.display_name || selectedPickup?.name || "Lokasi Saat Ini",
-        to: selectedDestination?.display_name || selectedDestination?.name || "Lokasi Saat Ini",
-      },
-      passenger: {
-        name: passengerName,
-        phone: passengerPhone,
-      },
-      fare: {
-        distanceKm: routeData ? routeData.distance : fareEstimate?.distance || 0,
-        farePerKm: fareEstimate ? Math.round(fareEstimate.additionalFare * (fareEstimate.additionalKm || 1)) : 0,
-        subTotal: fareEstimate?.additionalFare || 0 ,
-        baseFare: fareEstimate?.baseFare || 0,
-        airportCharge: fareEstimate?.airportFare || 0,
-      },
-      driver: selectedDriver,
-      vehicleType: selectedVehicle?.name,
-      totalFare: finalFare,
-    };
-  };
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d')!;
 
-// Enhanced function to download receipt as JPG with imported logo and QR code
-const handleDownloadReceipt = async () => {
-  const receiptData = generateReceiptData();
+    tempCanvas.width = width;
+    tempCanvas.height = 4000 * SCALE;
 
-  // Base for thermal 58mm
-  const BASE_WIDTH = 384; // recommended width for 58mm
-  const SCALE = 2; // 2x scale per permintaanmu
-  const width = BASE_WIDTH * SCALE; // 768 px
-
-  const tempCanvas = document.createElement('canvas');
-  const tempCtx = tempCanvas.getContext('2d')!;
-
-  tempCanvas.width = width;
-  tempCanvas.height = 4000 * SCALE; // tinggi sementara, nanti dicrop
-
-  if (!tempCtx) {
-    toast.error("Canvas Error", {
-      description: "Unable to create canvas context for receipt generation",
-    });
-    return;
-  }
-
-  try {
-    // Background
-    tempCtx.fillStyle = '#ffffff';
-    tempCtx.fillRect(0, 0, width, tempCanvas.height);
-
-    // Layout constants scaled
-    let yPos = 18 * SCALE; // start margin
-    const leftMargin = 12 * SCALE;
-    const rightMargin = width - 12 * SCALE;
-    const contentWidth = width - leftMargin - 12 * SCALE;
-
-    // Font sizes as numbers (scaled)
-    const FS_XS = 18 * SCALE;
-    const FS_SM = 19 * SCALE;
-    const FS_MD = 20 * SCALE;
-    const FS_BOLD_SM = 20 * SCALE;
-    const FS_BOLD_MD = 22 * SCALE;
-
-    // Spacing parameters (tweak these if masih terasa rapat)
-    const LINE_GAP = 18 * SCALE;            // base extra gap added in drawText return
-    const EXTRA_VALUE_GAP = 8 * SCALE;      // extra offset between key and first value line
-    const EXTRA_BLOCK_GAP = 12 * SCALE;     // extra gap between blocks (e.g. after subtotal)
-
-    // NEW: extra gap between logo and title
-    const EXTRA_LOGO_TITLE_GAP = 18 * SCALE; // adjust this to increase/reduce gap
-
-    // Helper to create font string
-    const fontStr = (size: number, weight: 'normal' | 'bold' = 'normal') =>
-      `${weight === 'bold' ? 'bold ' : ''}${Math.round(size)}px Arial, sans-serif`;
-
-    // drawText helper
-    const drawText = (
-      text: string,
-      x: number,
-      y: number,
-      size: number = FS_SM,
-      weight: 'normal' | 'bold' = 'normal',
-      align: 'left' | 'center' | 'right' = 'left'
-    ) => {
-      tempCtx.font = fontStr(size, weight);
-      tempCtx.textAlign = align;
-      tempCtx.fillStyle = '#000000';
-      tempCtx.fillText(text, x, y);
-      return y + Math.round(size) + LINE_GAP;
-    };
-
-    // wrapText helper with larger lineHeight default
-    const wrapText = (
-      text: string,
-      x: number,
-      y: number,
-      maxWidth: number,
-      size: number = FS_SM,
-      lineHeight: number = Math.round(FS_MD + (8 * SCALE)),
-      align: 'left' | 'center' | 'right' = 'left'
-    ) => {
-      tempCtx.font = fontStr(size, 'normal');
-      tempCtx.textAlign = align;
-      const words = text.split(' ');
-      let line = '';
-      for (let i = 0; i < words.length; i++) {
-        const testLine = line + words[i] + ' ';
-        const metrics = tempCtx.measureText(testLine);
-        if (metrics.width > maxWidth && line !== '') {
-          tempCtx.fillText(line.trim(), x, y);
-          line = words[i] + ' ';
-          y += lineHeight;
-        } else {
-          line = testLine;
-        }
-      }
-      if (line) {
-        tempCtx.fillText(line.trim(), x, y);
-        y += lineHeight;
-      }
-      return y;
-    };
-
-    /**
-     * drawKeyValue:
-     * - key printed at baseline y (left)
-     * - value lines printed starting at y + valueTopOffset (so key tidak 'menempel' pada baris pertama value)
-     * - valueLineHeight default lebih besar sehingga wrapped lines punya jarak baik
-     */
-    const drawKeyValue = (
-      key: string,
-      value: string,
-      y: number,
-      opts?: {
-        keySize?: number;
-        valueSize?: number;
-        valueLineHeight?: number;
-        valueMaxWidth?: number;
-      }
-    ) => {
-      const keySize = opts?.keySize ?? FS_BOLD_SM;
-      const valueSize = opts?.valueSize ?? FS_MD;
-      // valueLineHeight dibuat lebih besar untuk spasi antar baris value
-      const valueLineHeight = opts?.valueLineHeight ?? Math.round(valueSize + (10 * SCALE));
-      const valueMaxWidth = opts?.valueMaxWidth ?? (contentWidth - (80 * SCALE));
-
-      // Prepare wrapped lines for value
-      tempCtx.font = fontStr(valueSize, 'normal');
-      let words = value.split(' ');
-      let line = '';
-      const lines: string[] = [];
-      for (let i = 0; i < words.length; i++) {
-        const testLine = line + words[i] + ' ';
-        const metrics = tempCtx.measureText(testLine);
-        if (metrics.width > valueMaxWidth && line !== '') {
-          lines.push(line.trim());
-          line = words[i] + ' ';
-        } else {
-          line = testLine;
-        }
-      }
-      if (line.trim()) lines.push(line.trim());
-
-      // Draw key (left)
-      tempCtx.font = fontStr(keySize, 'bold');
-      tempCtx.textAlign = 'left';
-      tempCtx.fillStyle = '#000000';
-      tempCtx.fillText(key, leftMargin, y);
-
-      // Draw value lines (right-aligned) - start a bit lower to separate from key
-      tempCtx.font = fontStr(valueSize, 'normal');
-      tempCtx.textAlign = 'right';
-      const valueStartY = y + EXTRA_VALUE_GAP;
-      for (let i = 0; i < lines.length; i++) {
-        tempCtx.fillText(lines[i], rightMargin, valueStartY + i * valueLineHeight);
-      }
-
-      // Return new y after all value lines + some extra gap
-      return valueStartY + lines.length * valueLineHeight + LINE_GAP;
-    };
-
-    // Divider with slightly larger gap after
-    const drawLine = (y: number) => {
-      tempCtx.strokeStyle = '#cccccc';
-      tempCtx.lineWidth = Math.max(1 * SCALE, 1);
-      tempCtx.beginPath();
-      tempCtx.moveTo(leftMargin, y);
-      tempCtx.lineTo(rightMargin, y);
-      tempCtx.stroke();
-      return y + (14 * SCALE);
-    };
-
-    // Image loaders (unchanged except using SCALE constants)
-    const loadLogoImage = (): Promise<HTMLImageElement> =>
-      new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => {
-          const fallbackCanvas = document.createElement('canvas');
-          const fallbackCtx = fallbackCanvas.getContext('2d')!;
-          const s = 64 * SCALE;
-          fallbackCanvas.width = s;
-          fallbackCanvas.height = s;
-          fallbackCtx.fillStyle = '#1e40af';
-          fallbackCtx.beginPath();
-          fallbackCtx.arc(s / 2, s / 2, (s / 2) - (4 * SCALE), 0, 2 * Math.PI);
-          fallbackCtx.fill();
-          fallbackCtx.fillStyle = '#ffffff';
-          fallbackCtx.font = `${Math.round(12 * SCALE)}px Arial`;
-          fallbackCtx.textAlign = 'center';
-          fallbackCtx.fillText('KOPSI', s / 2, s / 2 + (6 * SCALE));
-          const fallbackImg = new Image();
-          fallbackImg.src = fallbackCanvas.toDataURL();
-          fallbackImg.onload = () => resolve(fallbackImg);
-        };
-        img.src = '/logo-kopsi-pekanbaru.jpeg';
+    if (!tempCtx) {
+      toast.error("Canvas Error", {
+        description: "Unable to create canvas context for receipt generation",
       });
-
-    const loadQRImage = (): Promise<HTMLImageElement> =>
-      new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => {
-          const fallbackCanvas = document.createElement('canvas');
-          const fallbackCtx = fallbackCanvas.getContext('2d')!;
-          const s = 120 * SCALE;
-          fallbackCanvas.width = s;
-          fallbackCanvas.height = s;
-          fallbackCtx.fillStyle = '#ffffff';
-          fallbackCtx.fillRect(0, 0, s, s);
-          fallbackCtx.fillStyle = '#000000';
-          for (let i = 0; i < 12; i++) {
-            for (let j = 0; j < 12; j++) {
-              if ((i + j) % 3 === 0) fallbackCtx.fillRect(i * (10 * SCALE), j * (10 * SCALE), 10 * SCALE, 10 * SCALE);
-            }
-          }
-          const fallbackImg = new Image();
-          fallbackImg.src = fallbackCanvas.toDataURL();
-          fallbackImg.onload = () => resolve(fallbackImg);
-        };
-        img.src = '/qrcode.png';
-      });
-
-    // --- START DRAW ---
-    tempCtx.fillStyle = '#000000';
-    yPos = drawText(receiptData.date, leftMargin, yPos, FS_XS, 'normal', 'left');
-    // time on same baseline (manual)
-    tempCtx.font = fontStr(FS_XS, 'normal');
-    tempCtx.textAlign = 'right';
-    tempCtx.fillText(receiptData.time, rightMargin, yPos - (Math.round(FS_XS) + LINE_GAP));
-    tempCtx.textAlign = 'left';
-
-    // Logo
-    yPos += 6 * SCALE;
-    const logoImg = await loadLogoImage();
-    const logoSize = 48 * SCALE;
-    tempCtx.drawImage(logoImg, width / 2 - logoSize / 2, yPos, logoSize, logoSize);
-    // apply extra gap between logo and title
-    yPos += logoSize + (12 * SCALE) + EXTRA_LOGO_TITLE_GAP;
-
-    // Company name
-    yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, FS_BOLD_MD, 'bold', 'center');
-    yPos += 6 * SCALE;
-
-    // Divider
-    yPos = drawLine(yPos);
-
-    // Detail Perjalanan
-    yPos = drawText('Detail Perjalanan:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-    yPos += 8 * SCALE;
-
-    // For addresses we increase valueMaxWidth so wrapping behaves better
-    yPos = drawKeyValue('Dari', receiptData.travel.from, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
-      valueMaxWidth: contentWidth - (60 * SCALE),
-    });
-
-    yPos = drawKeyValue('Tujuan', receiptData.travel.to, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
-      valueMaxWidth: contentWidth - (60 * SCALE),
-    });
-
-    yPos += 8 * SCALE;
-    yPos = drawLine(yPos);
-
-    // Detail Penumpang
-    yPos = drawText('Detail Penumpang:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-    yPos += 8 * SCALE;
-
-    yPos = drawKeyValue('Nama', receiptData.passenger.name, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
-
-    yPos = drawKeyValue('HP', receiptData.passenger.phone, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
-
-    yPos += 8 * SCALE;
-    yPos = drawLine(yPos);
-
-    // Detail Tarif
-    yPos = drawText('Detail Tarif:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-    yPos += 8 * SCALE;
-
-    // yPos = drawKeyValue('Jarak (KM)', receiptData.fare.distanceKm.toFixed(1), yPos, {
-    //   keySize: FS_BOLD_SM,
-    //   valueSize: FS_MD,
-    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    // });
-
-    // yPos = drawKeyValue('Tarif / KM', `Rp ${receiptData.fare.farePerKm.toLocaleString()}`, yPos, {
-    //   keySize: FS_BOLD_SM,
-    //   valueSize: FS_MD,
-    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    // });
-
-    // Subtotal row and add extra block gap AFTER subtotal so next items tidak menempel
-    tempCtx.font = fontStr(FS_BOLD_SM, 'bold');
-    tempCtx.textAlign = 'left';
-    tempCtx.fillText('Subtotal', leftMargin, yPos);
-    tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${Math.round(receiptData.fare.subTotal).toLocaleString()}`, rightMargin, yPos);
-    yPos += (20 * SCALE);
-
-    // add extra gap so "Tarif Dasar" tidak menempel ke Subtotal
-    yPos += EXTRA_BLOCK_GAP;
-
-    // yPos = drawKeyValue('Tarif Dasar', `Rp ${receiptData.fare.baseFare.toLocaleString()}`, yPos, {
-    //   keySize: FS_BOLD_SM,
-    //   valueSize: FS_MD,
-    //   valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    // });
-
-    yPos = drawKeyValue('Airport Charge', `Rp ${receiptData.fare.airportCharge.toLocaleString()}`, yPos, {
-      keySize: FS_BOLD_SM,
-      valueSize: FS_MD,
-      valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
-    });
-
-    yPos += 8 * SCALE;
-    yPos = drawLine(yPos);
-    yPos += 10 * SCALE;
-
-    // TOTAL
-    tempCtx.font = fontStr(28 * SCALE, 'bold');
-    tempCtx.textAlign = 'left';
-    tempCtx.fillText('TOTAL', leftMargin, yPos);
-    tempCtx.textAlign = 'right';
-    tempCtx.fillText(`Rp ${receiptData.totalFare.toLocaleString()}`, rightMargin, yPos);
-    yPos += (28 * SCALE);
-
-    // Driver info
-    if (receiptData.driver) {
-      yPos = drawText('Informasi Driver:', leftMargin, yPos, FS_BOLD_SM, 'bold');
-      yPos = drawText(`Nama: ${receiptData.driver.name}`, leftMargin, yPos, FS_SM, 'normal');
-      yPos = drawText(`Plat: ${receiptData.driver.plate}`, leftMargin, yPos, FS_SM, 'normal');
-      yPos = drawText(`HP: ${receiptData.driver.phone}`, leftMargin, yPos, FS_SM, 'normal');
-      yPos += 12 * SCALE;
+      return;
     }
 
-    // QR Code (spacing generous)
-    yPos += 12 * SCALE;
-    const qrSize = 96 * SCALE;
-    const qrX = width / 2 - qrSize / 2;
     try {
-      const qrImg = await loadQRImage();
-      tempCtx.drawImage(qrImg, qrX, yPos, qrSize, qrSize);
-    } catch (error) {
-      console.error("Failed to load QR code image:", error);
-      tempCtx.fillStyle = '#f0f0f0';
-      tempCtx.fillRect(qrX, yPos, qrSize, qrSize);
-      tempCtx.strokeStyle = '#cccccc';
-      tempCtx.strokeRect(qrX, yPos, qrSize, qrSize);
-      tempCtx.fillStyle = '#666666';
-      tempCtx.font = fontStr(FS_SM, 'normal');
-      tempCtx.textAlign = 'center';
-      tempCtx.fillText('QR Code', width / 2, yPos + qrSize / 2);
-    }
-    yPos += qrSize + (14 * SCALE);
+      tempCtx.fillStyle = '#ffffff';
+      tempCtx.fillRect(0, 0, width, tempCanvas.height);
 
-    // QR description
-    // tempCtx.fillStyle = '#666666';
-    // tempCtx.font = fontStr(FS_XS, 'normal');
-    // tempCtx.textAlign = 'center';
-    // tempCtx.fillText('Scan untuk verifikasi receipt', width / 2, yPos);
-    // yPos += 16 * SCALE;
+      let yPos = 18 * SCALE;
+      const leftMargin = 12 * SCALE;
+      const rightMargin = width - 12 * SCALE;
+      const contentWidth = width - leftMargin - 12 * SCALE;
 
-    // Footer note (wrap) with larger lineHeight
-    tempCtx.fillStyle = '#666666';
-    tempCtx.font = `italic ${Math.round(12 * SCALE)}px Arial, sans-serif`;
-    tempCtx.fillStyle = '#000000';
-    tempCtx.font = `bold ${Math.round(14 * SCALE)}px Arial, sans-serif`;
-    tempCtx.textAlign = 'left';
-    const noteText = 'Catatan: Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.';
-    yPos = wrapText(noteText, leftMargin, yPos, contentWidth, 12 * SCALE, Math.round(14 * SCALE), 'left');
-    yPos += 22 * SCALE;
+      const FS_XS = 18 * SCALE;
+      const FS_SM = 19 * SCALE;
+      const FS_MD = 20 * SCALE;
+      const FS_BOLD_SM = 20 * SCALE;
+      const FS_BOLD_MD = 22 * SCALE;
 
-    // Final crop
-    const actualHeight = Math.max(yPos + (12 * SCALE), 200 * SCALE);
-    const finalCanvas = document.createElement('canvas');
-    const finalCtx = finalCanvas.getContext('2d')!;
-    finalCanvas.width = width;
-    finalCanvas.height = actualHeight;
+      const LINE_GAP = 18 * SCALE;
+      const EXTRA_VALUE_GAP = 8 * SCALE;
+      const EXTRA_BLOCK_GAP = 12 * SCALE;
+      const EXTRA_LOGO_TITLE_GAP = 18 * SCALE;
 
-    finalCtx.fillStyle = '#ffffff';
-    finalCtx.fillRect(0, 0, width, actualHeight);
-    finalCtx.drawImage(tempCanvas, 0, 0, width, actualHeight, 0, 0, width, actualHeight);
+      const fontStr = (size: number, weight: 'normal' | 'bold' = 'normal') =>
+        `${weight === 'bold' ? 'bold ' : ''}${Math.round(size)}px Arial, sans-serif`;
 
-    // Save PNG
-    finalCanvas.toBlob((blob) => {
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `receipt-kopsi-${receiptData.passenger.name.replace(/\s+/g, '-')}-${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        toast.success("Receipt Downloaded!", {
-          description: "Receipt KOPSI telah disimpan (spacing diperbaiki).",
-        });
-      } else {
-        toast.error("Error", { description: "Gagal menghasilkan file gambar" });
-      }
-    }, 'image/png');
-
-  } catch (error) {
-    console.error("Error generating receipt:", error);
-    toast.error("Error", {
-      description: "Gagal membuat receipt. Silakan coba lagi.",
-    });
-  }
-};
-
-
-
-
-
-
-  // Function to generate WhatsApp message
-//   const generateWhatsAppMessage = () => {
-//     const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
-//     const selectedVehicle = VEHICLE_TYPES.find(v => v.id === selectedVehicleType);
-//     const finalFare = fareEstimate ? calculateVehicleFare(fareEstimate.totalFare, selectedVehicleType) : 0;
-//     const selectedDriver = availableDrivers.find(d => d.id === selectedDriverId);
-
-//     const message = `Halo ${passengerName},
-
-// Pesanan taksi Anda telah dikonfirmasi!
-
-// ðŸ“ *Detail Perjalanan:*
-// â€¢ Dari: ${selectedPickup?.address || "Lokasi Saat Ini"}
-// â€¢ Tujuan: ${selectedDestination?.address}
-// â€¢ Jenis Kendaraan: ${selectedVehicle?.name}
-// â€¢ Jarak: ${routeData ? routeData.distance.toFixed(1) : fareEstimate?.distance.toFixed(1)} km
-// â€¢ Estimasi Waktu: ${routeData ? Math.round(routeData.duration) : Math.round((fareEstimate?.distance || 0) * 2.5)} menit
-
-// ðŸ’° *Tarif:*
-// â€¢ Total: ${formatCurrency(finalFare)}
-
-// ðŸ‘¨â€ðŸ’¼ *Driver:*
-// â€¢ Nama: ${selectedDriver?.name || "Akan ditentukan"}
-// â€¢ Plat: ${selectedDriver?.plate || "Akan ditentukan"}
-// â€¢ HP Driver: ${selectedDriver?.phone || "Akan diberitahu"}
-
-// Terima kasih telah menggunakan layanan kami!`;
-
-//     return encodeURIComponent(message);
-//   };
-
-  // Function to open WhatsApp
-  const openWhatsApp = () => {
-    // Clean phone number (remove +62, 0, spaces, dashes)
-    const cleanPhone = passengerPhone.replace(/[\s\-\+]/g, '').replace(/^0/, '62').replace(/^62/, '62');
-    // const message = generateWhatsAppMessage();
-    const whatsappUrl = `https://wa.me/${cleanPhone}`;
-
-    // Open WhatsApp in new tab
-    window.open(whatsappUrl, '_blank');
-
-    // Show success toast
-    toast.success("WhatsApp Dibuka!", {
-      description: `Pesan konfirmasi telah disiapkan untuk ${passengerName}`,
-      duration: 3000,
-    });
-
-    // Reset form
-    setPassengerName("");
-    setPassengerPhone("");
-    setSelectedDriverId(null);
-    setShowConfirmDialog(false);
-
-    // Call the original onBookRide callback if needed
-    const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
-    if (pickupLocation && selectedDestination && fareEstimate) {
-      const rideData = {
-        passengerName,
-        passengerPhone,
-        pickupAddress: selectedPickup?.address || "Lokasi Saat Ini",
-        pickupCoordinates: pickupLocation,
-        dropoffAddress: selectedDestination.address,
-        dropoffCoordinates: {
-          lat: selectedDestination.lat,
-          lng: selectedDestination.lng,
-        },
-        requestedVehicleType: selectedVehicleType,
-        totalFare: calculateVehicleFare(fareEstimate.totalFare, selectedVehicleType),
+      const drawText = (
+        text: string,
+        x: number,
+        y: number,
+        size: number = FS_SM,
+        weight: 'normal' | 'bold' = 'normal',
+        align: 'left' | 'center' | 'right' = 'left'
+      ) => {
+        tempCtx.font = fontStr(size, weight);
+        tempCtx.textAlign = align;
+        tempCtx.fillStyle = '#000000';
+        tempCtx.fillText(text, x, y);
+        return y + Math.round(size) + LINE_GAP;
       };
-      onBookRide(rideData);
-    }
-  };
 
-  const bookRideMutation = useMutation({
-    mutationFn: async () => {
-      const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
-
-      if (!selectedDestination || !fareEstimate || !pickupLocation) {
-        throw new Error("Missing required data for booking");
-      }
-
-      const selectedVehicle = VEHICLE_TYPES.find(v => v.id === selectedVehicleType);
-      const finalFare = calculateVehicleFare(fareEstimate.totalFare, selectedVehicleType);
-
-      let pickupAddress;
-
-      if (selectedPickup) {
-        pickupAddress = selectedPickup.address;
-      } else {
-        try {
-          pickupAddress = await gpsService.reverseGeocode(currentLocation!);
-        } catch (error) {
-          console.error("Reverse geocoding failed:", error);
-          pickupAddress = `${currentLocation!.lat}, ${currentLocation!.lng}`;
+      const wrapText = (
+        text: string,
+        x: number,
+        y: number,
+        maxWidth: number,
+        size: number = FS_SM,
+        lineHeight: number = Math.round(FS_MD + (8 * SCALE)),
+        align: 'left' | 'center' | 'right' = 'left'
+      ) => {
+        tempCtx.font = fontStr(size, 'normal');
+        tempCtx.textAlign = align;
+        const words = text.split(' ');
+        let line = '';
+        for (let i = 0; i < words.length; i++) {
+          const testLine = line + words[i] + ' ';
+          const metrics = tempCtx.measureText(testLine);
+          if (metrics.width > maxWidth && line !== '') {
+            tempCtx.fillText(line.trim(), x, y);
+            line = words[i] + ' ';
+            y += lineHeight;
+          } else {
+            line = testLine;
+          }
         }
-      }
-
-      // Use NestJS backend endpoint
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
-
-      const orderData = {
-        passengerName: passengerName || "Guest User",
-        passengerPhone: passengerPhone || "",
-        pickupAddress: selectedPickup?.address || "Lokasi Saat Ini",
-        pickupCoordinates: {
-          lat: pickupLocation.lat,
-          lng: pickupLocation.lng,
-        },
-        dropoffAddress: selectedDestination.address,
-        dropoffCoordinates: {
-          lat: selectedDestination.lat,
-          lng: selectedDestination.lng,
-        },
-        requestedVehicleType: selectedVehicleType,
-        distanceMeters: Math.round(fareEstimate.distance * 1000),
-        estimatedDurationMinutes: routeData?.duration || Math.round(fareEstimate.distance * 2.5),
-        baseFare: Math.round(fareEstimate.baseFare * 100), // Convert to cents
-        distanceFare: Math.round(fareEstimate.additionalFare * 100),
-        airportFare: Math.round((fareEstimate.airportFare || 0) * 100),
-        totalFare: Math.round(finalFare * 100),
-        paymentMethod: "CASH" as const,
-        routeData: routeData ? {
-          coordinates: routeData.coordinates,
-          distance: routeData.distance,
-          duration: routeData.duration,
-        } : undefined,
-        specialRequests: selectedDriverId ? `Preferred driver: ${selectedDriverId}` : undefined,
+        if (line) {
+          tempCtx.fillText(line.trim(), x, y);
+          y += lineHeight;
+        }
+        return y;
       };
 
-      const response = await fetch(`${backendUrl}/api/orders`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          // Add authentication headers if needed
-          // "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify(orderData),
+      const drawKeyValue = (
+        key: string,
+        value: string,
+        y: number,
+        opts?: {
+          keySize?: number;
+          valueSize?: number;
+          valueLineHeight?: number;
+          valueMaxWidth?: number;
+        }
+      ) => {
+        const keySize = opts?.keySize ?? FS_BOLD_SM;
+        const valueSize = opts?.valueSize ?? FS_MD;
+        const valueLineHeight = opts?.valueLineHeight ?? Math.round(valueSize + (10 * SCALE));
+        const valueMaxWidth = opts?.valueMaxWidth ?? (contentWidth - (80 * SCALE));
+
+        tempCtx.font = fontStr(valueSize, 'normal');
+        let words = value.split(' ');
+        let line = '';
+        const lines: string[] = [];
+        for (let i = 0; i < words.length; i++) {
+          const testLine = line + words[i] + ' ';
+          const metrics = tempCtx.measureText(testLine);
+          if (metrics.width > valueMaxWidth && line !== '') {
+            lines.push(line.trim());
+            line = words[i] + ' ';
+          } else {
+            line = testLine;
+          }
+        }
+        if (line.trim()) lines.push(line.trim());
+
+        tempCtx.font = fontStr(keySize, 'bold');
+        tempCtx.textAlign = 'left';
+        tempCtx.fillStyle = '#000000';
+        tempCtx.fillText(key, leftMargin, y);
+
+        tempCtx.font = fontStr(valueSize, 'normal');
+        tempCtx.textAlign = 'right';
+        const valueStartY = y + EXTRA_VALUE_GAP;
+        for (let i = 0; i < lines.length; i++) {
+          tempCtx.fillText(lines[i], rightMargin, valueStartY + i * valueLineHeight);
+        }
+
+        return valueStartY + lines.length * valueLineHeight + LINE_GAP;
+      };
+
+      const drawLine = (y: number) => {
+        tempCtx.strokeStyle = '#cccccc';
+        tempCtx.lineWidth = Math.max(1 * SCALE, 1);
+        tempCtx.beginPath();
+        tempCtx.moveTo(leftMargin, y);
+        tempCtx.lineTo(rightMargin, y);
+        tempCtx.stroke();
+        return y + (14 * SCALE);
+      };
+
+      const loadLogoImage = (): Promise<HTMLImageElement> =>
+        new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => resolve(img);
+          img.onerror = () => {
+            const fallbackCanvas = document.createElement('canvas');
+            const fallbackCtx = fallbackCanvas.getContext('2d')!;
+            const s = 64 * SCALE;
+            fallbackCanvas.width = s;
+            fallbackCanvas.height = s;
+            fallbackCtx.fillStyle = '#1e40af';
+            fallbackCtx.beginPath();
+            fallbackCtx.arc(s / 2, s / 2, (s / 2) - (4 * SCALE), 0, 2 * Math.PI);
+            fallbackCtx.fill();
+            fallbackCtx.fillStyle = '#ffffff';
+            fallbackCtx.font = `${Math.round(12 * SCALE)}px Arial`;
+            fallbackCtx.textAlign = 'center';
+            fallbackCtx.fillText('KOPSI', s / 2, s / 2 + (6 * SCALE));
+            const fallbackImg = new Image();
+            fallbackImg.src = fallbackCanvas.toDataURL();
+            fallbackImg.onload = () => resolve(fallbackImg);
+          };
+          img.src = '/logo-kopsi-pekanbaru.jpeg';
+        });
+
+      const loadQRImage = (): Promise<HTMLImageElement> =>
+        new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => resolve(img);
+          img.onerror = () => {
+            const fallbackCanvas = document.createElement('canvas');
+            const fallbackCtx = fallbackCanvas.getContext('2d')!;
+            const s = 120 * SCALE;
+            fallbackCanvas.width = s;
+            fallbackCanvas.height = s;
+            fallbackCtx.fillStyle = '#ffffff';
+            fallbackCtx.fillRect(0, 0, s, s);
+            fallbackCtx.fillStyle = '#000000';
+            for (let i = 0; i < 12; i++) {
+              for (let j = 0; j < 12; j++) {
+                if ((i + j) % 3 === 0) fallbackCtx.fillRect(i * (10 * SCALE), j * (10 * SCALE), 10 * SCALE, 10 * SCALE);
+              }
+            }
+            const fallbackImg = new Image();
+            fallbackImg.src = fallbackCanvas.toDataURL();
+            fallbackImg.onload = () => resolve(fallbackImg);
+          };
+          img.src = '/qrcode.png';
+        });
+
+      // --- START DRAW ---
+      tempCtx.fillStyle = '#000000';
+      yPos = drawText(receiptData.date, leftMargin, yPos, FS_XS, 'normal', 'left');
+      tempCtx.font = fontStr(FS_XS, 'normal');
+      tempCtx.textAlign = 'right';
+      tempCtx.fillText(receiptData.time, rightMargin, yPos - (Math.round(FS_XS) + LINE_GAP));
+      tempCtx.textAlign = 'left';
+
+      yPos += 6 * SCALE;
+      const logoImg = await loadLogoImage();
+      const logoSize = 48 * SCALE;
+      tempCtx.drawImage(logoImg, width / 2 - logoSize / 2, yPos, logoSize, logoSize);
+      yPos += logoSize + (12 * SCALE) + EXTRA_LOGO_TITLE_GAP;
+
+      yPos = drawText('KOPSI PEKANBARU', width / 2, yPos, FS_BOLD_MD, 'bold', 'center');
+      yPos += 6 * SCALE;
+
+      yPos = drawLine(yPos);
+
+      yPos = drawText('Detail Perjalanan:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+      yPos += 8 * SCALE;
+
+      yPos = drawKeyValue('Dari', receiptData.travel.from, yPos, {
+        keySize: FS_BOLD_SM,
+        valueSize: FS_MD,
+        valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
+        valueMaxWidth: contentWidth - (60 * SCALE),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Booking failed:", errorData);
-        throw new Error(errorData.message || "Failed to book ride");
+      yPos = drawKeyValue('Tujuan', receiptData.travel.to, yPos, {
+        keySize: FS_BOLD_SM,
+        valueSize: FS_MD,
+        valueLineHeight: Math.round(FS_MD + (12 * SCALE)),
+        valueMaxWidth: contentWidth - (60 * SCALE),
+      });
+
+      yPos += 8 * SCALE;
+      yPos = drawLine(yPos);
+
+      yPos = drawText('Detail Penumpang:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+      yPos += 8 * SCALE;
+
+      yPos = drawKeyValue('Nama', receiptData.passenger.name, yPos, {
+        keySize: FS_BOLD_SM,
+        valueSize: FS_MD,
+        valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
+      });
+
+      yPos = drawKeyValue('HP', receiptData.passenger.phone, yPos, {
+        keySize: FS_BOLD_SM,
+        valueSize: FS_MD,
+        valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
+      });
+
+      yPos += 8 * SCALE;
+      yPos = drawLine(yPos);
+
+      yPos = drawText('Detail Tarif:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+      yPos += 8 * SCALE;
+
+      tempCtx.font = fontStr(FS_BOLD_SM, 'bold');
+      tempCtx.textAlign = 'left';
+      tempCtx.fillText('Subtotal', leftMargin, yPos);
+      tempCtx.textAlign = 'right';
+      tempCtx.fillText(`Rp ${Math.round(receiptData.fare.subTotal).toLocaleString()}`, rightMargin, yPos);
+      yPos += (20 * SCALE);
+
+      yPos += EXTRA_BLOCK_GAP;
+
+      yPos = drawKeyValue('Airport Charge', `Rp ${receiptData.fare.airportCharge.toLocaleString()}`, yPos, {
+        keySize: FS_BOLD_SM,
+        valueSize: FS_MD,
+        valueLineHeight: Math.round(FS_MD + (10 * SCALE)),
+      });
+
+      yPos += 8 * SCALE;
+      yPos = drawLine(yPos);
+      yPos += 10 * SCALE;
+
+      tempCtx.font = fontStr(28 * SCALE, 'bold');
+      tempCtx.textAlign = 'left';
+      tempCtx.fillText('TOTAL', leftMargin, yPos);
+      tempCtx.textAlign = 'right';
+      tempCtx.fillText(`Rp ${receiptData.totalFare.toLocaleString()}`, rightMargin, yPos);
+      yPos += (28 * SCALE);
+
+      if (receiptData.driver) {
+        yPos = drawText('Informasi Driver:', leftMargin, yPos, FS_BOLD_SM, 'bold');
+        yPos = drawText(`Nama: ${receiptData.driver.name}`, leftMargin, yPos, FS_SM, 'normal');
+        yPos = drawText(`Plat: ${receiptData.driver.plate}`, leftMargin, yPos, FS_SM, 'normal');
+        yPos = drawText(`HP: ${receiptData.driver.phone}`, leftMargin, yPos, FS_SM, 'normal');
+        yPos += 12 * SCALE;
       }
 
-      const result = await response.json();
-      return { rideData: orderData, response: result };
-    },
-    onSuccess: (data) => {
-      toast.success("Pesanan Berhasil Dibuat!", {
-        description: `Order ${data.response.data?.orderNumber || ''} telah dibuat dan driver akan segera ditugaskan.`,
-        duration: 5000,
+      yPos += 12 * SCALE;
+      const qrSize = 96 * SCALE;
+      const qrX = width / 2 - qrSize / 2;
+      try {
+        const qrImg = await loadQRImage();
+        tempCtx.drawImage(qrImg, qrX, yPos, qrSize, qrSize);
+      } catch (error) {
+        tempCtx.fillStyle = '#f0f0f0';
+        tempCtx.fillRect(qrX, yPos, qrSize, qrSize);
+        tempCtx.strokeStyle = '#cccccc';
+        tempCtx.strokeRect(qrX, yPos, qrSize, qrSize);
+        tempCtx.fillStyle = '#666666';
+        tempCtx.font = fontStr(FS_SM, 'normal');
+        tempCtx.textAlign = 'center';
+        tempCtx.fillText('QR Code', width / 2, yPos + qrSize / 2);
+      }
+      yPos += qrSize + (14 * SCALE);
+
+      // Footer note
+      tempCtx.fillStyle = '#000000';
+      tempCtx.font = `bold ${Math.round(14 * SCALE)}px Arial, sans-serif`;
+      tempCtx.textAlign = 'left';
+      const noteText = 'Catatan: Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.';
+      yPos = wrapText(noteText, leftMargin, yPos, contentWidth, 12 * SCALE, Math.round(14 * SCALE), 'left');
+      yPos += 22 * SCALE;
+
+      // Final crop
+      const actualHeight = Math.max(yPos + (12 * SCALE), 200 * SCALE);
+      const finalCanvas = document.createElement('canvas');
+      const finalCtx = finalCanvas.getContext('2d')!;
+      finalCanvas.width = width;
+      finalCanvas.height = actualHeight;
+
+      finalCtx.fillStyle = '#ffffff';
+      finalCtx.fillRect(0, 0, width, actualHeight);
+      finalCtx.drawImage(tempCanvas, 0, 0, width, actualHeight, 0, 0, width, actualHeight);
+
+      // Save PNG
+      finalCanvas.toBlob((blob) => {
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `receipt-kopsi-${receiptData.passenger.name.replace(/\s+/g, '-')}-${Date.now()}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          toast.success("Receipt Downloaded!", {
+            description: "Receipt KOPSI telah disimpan.",
+          });
+        } else {
+          toast.error("Error", { description: "Gagal menghasilkan file gambar" });
+        }
+      }, 'image/png');
+
+    } catch (error) {
+      console.error("Error generating receipt:", error);
+      toast.error("Error", {
+        description: "Gagal membuat receipt. Silakan coba lagi.",
       });
-
-      // Reset form
-      setPassengerName("");
-      setPassengerPhone("");
-      setSelectedDriverId(null);
-      // if (fareEstimate) {
-      //   handlePrintReceipt(fareEstimate); // cetak struk
-      // }
-
-      onBookRide(data.rideData);
-    },
-    onError: (error) => {
-      console.error("Booking error:", error);
-      toast.error("Gagal Membuat Pesanan", {
-        description: error.message || "Silakan coba lagi",
-      });
-    },
-  });
-
-  const getVehiclePrice = (basePrice: number, vehicleId: VehicleType) => {
-    return calculateVehicleFare(basePrice, vehicleId);
+    }
   };
 
+  // Booking Functions
   const handleBookRideClick = () => {
-    // Show confirmation dialog instead of directly booking
     setShowConfirmDialog(true);
   };
 
-  const handleConfirmBooking = () => {
-    // Open WhatsApp with confirmation message
-    openWhatsApp();
+  const handleConfirmBooking = async () => {
+    try {
+      const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
+
+      if (!selectedDestination || !fareEstimate || !pickupLocation) {
+        toast.error("Data tidak lengkap", {
+          description: "Pastikan semua data sudah terisi dengan benar",
+        });
+        return;
+      }
+
+      const distanceKm = Number(fareEstimate.distance ?? 0);
+      if (distanceKm <= 0) {
+        toast.error("Error Kalkulasi Jarak", {
+          description: "Jarak perjalanan tidak valid. Silakan pilih ulang lokasi.",
+        });
+        return;
+      }
+
+      const selectedDriver = availableDrivers.find(d => d.id === selectedDriverId);
+      const pickupAddr = selectedPickup?.address || "Lokasi Saat Ini";
+      const destinationAddr = selectedDestination.address;
+
+      let farePayload;
+      try {
+        farePayload = buildFarePayload(distanceKm, pickupAddr, destinationAddr, selectedVehicleType);
+      } catch (error) {
+        toast.error("Error Kalkulasi Tarif", {
+          description: "Terjadi kesalahan saat menghitung tarif. Silakan coba lagi.",
+        });
+        return;
+      }
+
+      const cleanedPhone = passengerPhone.replace(/[\s\-\+]/g, '').replace(/^0/, '62');
+      if (cleanedPhone.length < 10 || cleanedPhone.length > 15) {
+        toast.error("Nomor HP Tidak Valid", {
+          description: "Nomor HP harus antara 10-15 digit",
+        });
+        return;
+      }
+
+      const orderData = {
+        passengerName: passengerName.trim(),
+        passengerPhone: cleanedPhone,
+        pickupAddress: pickupAddr.substring(0, 500),
+        pickupCoordinates: {
+          lat: Number(pickupLocation.lat),
+          lng: Number(pickupLocation.lng),
+        },
+        dropoffAddress: destinationAddr.substring(0, 500),
+        dropoffCoordinates: {
+          lat: Number(selectedDestination.lat),
+          lng: Number(selectedDestination.lng),
+        },
+        requestedVehicleType: selectedVehicleType,
+        distanceMeters: Math.round(distanceKm * 1000),
+        estimatedDurationMinutes: Math.round(computeDurationEstimate(routeData, fareEstimate)),
+        baseFare: Math.round(farePayload.baseCents),
+        distanceFare: Math.round(farePayload.distanceCents),
+        airportFare: farePayload.airportCents > 0 ? Math.round(farePayload.airportCents) : undefined,
+        totalFare: Math.round(farePayload.totalCents),
+        paymentMethod: "CASH" as const,
+        specialRequests: selectedDriverId ? 
+          `Preferred driver: ${selectedDriver?.name} (${selectedDriver?.plate})`.substring(0, 1000) : 
+          undefined,
+      };
+
+      toast.loading("Membuat pesanan...", { id: "creating-order" });
+      
+      const orderResponse = await fetch("/api/orders/operator/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderData),
+      });
+
+      if (!orderResponse.ok) {
+        const errorData = await orderResponse.json();
+        throw new Error(errorData.message || "Failed to create order");
+      }
+
+      const orderResult = await orderResponse.json();
+      const orderId = orderResult.data.id;
+
+      toast.success("Order berhasil dibuat!", { id: "creating-order" });
+
+      let finalOrderData = orderResult.data;
+      
+      if (selectedDriverId && selectedDriver && selectedDriver.fleetId) {
+        toast.loading("Menugaskan driver...", { id: "assigning-driver" });
+        
+        try {
+          const assignResponse = await fetch(`/api/orders/operator/${orderId}/assign`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              driverId: selectedDriverId,
+              fleetId: selectedDriver.fleetId,
+              reason: `Driver assigned by operator to ${passengerName}`,
+            }),
+          });
+
+          if (assignResponse.ok) {
+            const assignResult = await assignResponse.json();
+            finalOrderData = assignResult.data;
+            toast.success("Driver berhasil ditugaskan!", { id: "assigning-driver" });
+          } else {
+            const assignErrorData = await assignResponse.json();
+            toast.error("Gagal menugaskan driver", { 
+              id: "assigning-driver",
+              description: assignErrorData.message || "Driver assignment failed"
+            });
+          }
+        } catch (assignError) {
+          toast.error("Gagal menugaskan driver", { 
+            id: "assigning-driver",
+            description: assignError instanceof Error ? assignError.message : "Unknown error"
+          });
+        }
+      }
+      
+      setLastOrderData({ 
+        orderResult: finalOrderData, 
+        tripData: orderData, 
+        driver: selectedDriver,
+        cleanedPhone: cleanedPhone
+      });
+      
+      setShowConfirmDialog(false);
+      setShowActionDialog(true);
+
+    } catch (error) {
+      console.error("Error creating order:", error);
+      
+      toast.dismiss("creating-order");
+      toast.dismiss("assigning-driver");
+      
+      toast.error("Gagal Membuat Order", {
+        description: error instanceof Error ? error.message : "Silakan coba lagi",
+        duration: 5000,
+      });
+    }
+  };
+
+  // WhatsApp Functions
+  const sendToDriver = () => {
+    if (!lastOrderData?.driver) return;
+    
+    const driverMessage = generateDriverWhatsAppMessage(lastOrderData.orderResult, lastOrderData.tripData);
+    const driverPhone = lastOrderData.driver.phone.replace(/[\s\-\+]/g, '').replace(/^0/, '62');
+    const driverWhatsAppUrl = `https://wa.me/${driverPhone}?text=${encodeURIComponent(driverMessage)}`;
+    window.open(driverWhatsAppUrl, '_blank');
+    
+    setDriverMessageSent(true);
+    toast.success("Template pesan driver telah disiapkan!", {
+      description: `Pesan order dikirim ke ${lastOrderData.driver.name}`,
+    });
+  };
+
+  const sendToCustomer = () => {
+    if (!lastOrderData) return;
+    
+    const customerWhatsAppUrl = `https://wa.me/${lastOrderData.cleanedPhone}`;
+    window.open(customerWhatsAppUrl, '_blank');
+    
+    setCustomerMessageSent(true);
+    toast.success("WhatsApp customer dibuka!", {
+      description: "Silakan kirim pesan konfirmasi manual ke customer",
+    });
+  };
+
+  const resetForm = () => {
+    setShowActionDialog(false);
+    setPassengerName("");
+    setPassengerPhone("");
+    setSelectedDriverId(null);
+    setDriverMessageSent(false);
+    setCustomerMessageSent(false);
+    setLastOrderData(null);
+    fetchAvailableDrivers(selectedVehicleType);
   };
 
   const isBookDisabled =
     !selectedDestination ||
     !currentLocation ||
-    bookRideMutation.isPending ||
     isCalculatingRoute ||
     passengerName.trim() === "" ||
     passengerPhone.trim() === "";
-
-    // console.log("SelectedPickup:", selectedPickup);
-    // console.log("SelectedDestination:", selectedDestination);
-
 
   return (
     <>
@@ -946,7 +975,7 @@ const handleDownloadReceipt = async () => {
 
         <ScrollArea className="p-6 pb-8 h-full">
           {/* Connection Status & Driver Info */}
-          <div className="bg-gray-50 rounded-xl p-3 mb-4">
+          {/* <div className="bg-gray-50 rounded-xl p-3 mb-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center">
                 {isConnected ? (
@@ -973,7 +1002,7 @@ const handleDownloadReceipt = async () => {
                 Refresh
               </Button>
             </div>
-          </div>
+          </div> */}
 
           {/* Route Info */}
           {routeData && routeData.coordinates && Array.isArray(routeData.coordinates) && routeData.coordinates.length > 1 && (
@@ -997,52 +1026,48 @@ const handleDownloadReceipt = async () => {
 
           {/* Location Inputs */}
           <div className="space-y-3 mb-6">
-  <Button
-    variant="outline"
-    className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
-    onClick={onPickupClick}
-    data-testid="button-select-pickup"
-  >
-    <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
-    <div className="flex flex-col items-start w-full min-w-0">
-      <p className={`font-medium w-full break-words whitespace-normal text-start ${
-        selectedPickup ? "text-gray-900" : "text-gray-400"
-      }`}>
-         {selectedPickup?.display_name ??
-   selectedPickup?.name ??
-   "Dari mana?"}
-      </p>
-      {selectedPickup && (
-        <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
-          {selectedPickup.formatted_address ?? selectedPickup.address}
-        </p>
-      )}
-    </div>
-  </Button>
+            <Button
+              variant="outline"
+              className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
+              onClick={onPickupClick}
+              data-testid="button-select-pickup"
+            >
+              <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
+              <div className="flex flex-col items-start w-full min-w-0">
+                <p className={`font-medium w-full break-words whitespace-normal text-start ${
+                  selectedPickup ? "text-gray-900" : "text-gray-400"
+                }`}>
+                  {selectedPickup?.display_name ?? selectedPickup?.name ?? "Dari mana?"}
+                </p>
+                {selectedPickup && (
+                  <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
+                    {selectedPickup.formatted_address ?? selectedPickup.address}
+                  </p>
+                )}
+              </div>
+            </Button>
 
-  <Button
-    variant="outline"
-    className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
-    onClick={onDestinationClick}
-    data-testid="button-select-destination"
-  >
-    <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
-    <div className="flex flex-col items-start w-full min-w-0">
-      <p className={`font-medium w-full break-words whitespace-normal text-start ${
-        selectedDestination ? "text-gray-900" : "text-gray-400"
-      }`}>
-        {selectedDestination?.display_name ??
-   selectedDestination?.name ??
-   "Mau ke mana?"}
-      </p>
-      {selectedDestination && (
-        <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
-          {selectedDestination.formatted_address ?? selectedDestination.address}
-        </p>
-      )}
-    </div>
-  </Button>
-</div>
+            <Button
+              variant="outline"
+              className="w-full flex items-center justify-start p-4 rounded-xl h-auto"
+              onClick={onDestinationClick}
+              data-testid="button-select-destination"
+            >
+              <MapPin className="h-5 w-5 text-green-600 mr-3 flex-shrink-0" />
+              <div className="flex flex-col items-start w-full min-w-0">
+                <p className={`font-medium w-full break-words whitespace-normal text-start ${
+                  selectedDestination ? "text-gray-900" : "text-gray-400"
+                }`}>
+                  {selectedDestination?.display_name ?? selectedDestination?.name ?? "Mau ke mana?"}
+                </p>
+                {selectedDestination && (
+                  <p className="text-xs text-gray-500 w-full break-words whitespace-normal text-start">
+                    {selectedDestination.formatted_address ?? selectedDestination.address}
+                  </p>
+                )}
+              </div>
+            </Button>
+          </div>
 
           {/* Vehicle Type Selection */}
           <div className="mb-6">
@@ -1128,7 +1153,7 @@ const handleDownloadReceipt = async () => {
             {/* Driver Selection */}
             <div>
               <label htmlFor="driver-select" className="text-sm font-medium text-gray-700 block mb-1">
-                Driver yang tersedia
+                Driver yang tersedia {loadingDrivers && "(Loading...)"}
               </label>
               <select
                 id="driver-select"
@@ -1136,6 +1161,7 @@ const handleDownloadReceipt = async () => {
                 value={selectedDriverId || ""}
                 onChange={(e) => setSelectedDriverId(e.target.value || null)}
                 className="w-full p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                disabled={loadingDrivers}
               >
                 <option value="">Pilih Driver</option>
                 {availableDrivers.map((d) => (
@@ -1144,8 +1170,13 @@ const handleDownloadReceipt = async () => {
                   </option>
                 ))}
               </select>
-              {availableDrivers.length === 0 && (
-                <p className="text-xs text-gray-500 mt-1">Tidak ada Driver tersedia saat ini.</p>
+              {availableDrivers.length === 0 && !loadingDrivers && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Tidak ada driver tersedia untuk kendaraan {VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name}
+                </p>
+              )}
+              {loadingDrivers && (
+                <p className="text-xs text-blue-500 mt-1">Memuat data driver...</p>
               )}
             </div>
           </div>
@@ -1167,12 +1198,6 @@ const handleDownloadReceipt = async () => {
                   </span>
                 </div>
               )}
-              {/* <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-600">Base fare</span>
-                <span className="text-sm" data-testid="text-base-fare">
-                  {formatCurrency(fareEstimate.baseFare)}
-                </span>
-              </div> */}
               {fareEstimate.additionalKm > 0 && (
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-gray-600">
@@ -1208,15 +1233,13 @@ const handleDownloadReceipt = async () => {
             onClick={handleBookRideClick}
             data-testid="button-book-ride"
           >
-            {bookRideMutation.isPending 
-              ? "Booking..." 
-              : isCalculatingRoute
-                ? "Calculating route..."
-                : selectedDestination && currentLocation && fareEstimate
-                  ? `Book ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name} ${formatCurrency(getVehiclePrice(fareEstimate.totalFare, selectedVehicleType))}`
-                  : !currentLocation
-                    ? "Getting your location..."
-                    : "Choose destination to book"
+            {isCalculatingRoute
+              ? "Calculating route..."
+              : selectedDestination && currentLocation && fareEstimate
+                ? `Book ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name} ${formatCurrency(getVehiclePrice(fareEstimate.totalFare, selectedVehicleType))}`
+                : !currentLocation
+                  ? "Getting your location..."
+                  : "Choose destination to book"
             }
           </Button>
         </ScrollArea>
@@ -1280,22 +1303,10 @@ const handleDownloadReceipt = async () => {
                 <div className="bg-gray-50 rounded-lg p-3">
                   <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Tarif :</h4>
                   <div className="space-y-1 text-xs">
-                    {/* <div className="flex justify-between">
-                      <strong>Jarak Tempuh (KM)</strong>
-                      <span>{(routeData ? routeData.distance : fareEstimate.distance).toFixed(1)}</span>
-                    </div> */}
-                    {/* <div className="flex justify-between">
-                      <strong>Tarif Per KM</strong>
-                      <span>Rp {fareEstimate.additionalKm > 0 ? Math.round(fareEstimate.additionalFare / fareEstimate.additionalKm).toLocaleString() : '0'}</span>
-                    </div> */}
                     <div className="flex justify-between ml-auto w-1/2 border-t pt-1">
                       <strong>Subtotal</strong>
                       <strong>Rp {fareEstimate.additionalFare.toLocaleString()}</strong>
                     </div>
-                    {/* <div className="flex justify-between">
-                      <strong>Tarif Dasar</strong>
-                      <span>Rp {fareEstimate.baseFare.toLocaleString()}</span>
-                    </div> */}
                     <div className="flex justify-between">
                       <strong>Airport Charge</strong>
                       <span>Rp {(fareEstimate.airportFare || 0).toLocaleString()}</span>
@@ -1325,7 +1336,7 @@ const handleDownloadReceipt = async () => {
               </div>
 
               <p className="text-gray-600 text-xs text-center border-t pt-2">
-                Konfirmasi pesanan akan dikirim melalui WhatsApp ke nomor penumpang.
+                Pesanan akan dibuat dan Anda dapat mengirim konfirmasi via WhatsApp.
               </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1335,9 +1346,106 @@ const handleDownloadReceipt = async () => {
               onClick={handleConfirmBooking}
               className="bg-green-600 hover:bg-green-700"
             >
-              <MessageCircle className="h-4 w-4 mr-2" />
-              Ya, Kirim via WhatsApp
+              <Check className="h-4 w-4 mr-2" />
+              Buat Pesanan
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Action Dialog - REORDERED: Driver First, then Customer */}
+      <AlertDialog open={showActionDialog} onOpenChange={setShowActionDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center text-green-600">
+              <Check className="h-5 w-5 mr-2" />
+              Order Berhasil Dibuat!
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Order #{lastOrderData?.orderResult?.orderNumber} telah tercatat di sistem.
+              <br />
+              Pilih tindakan selanjutnya:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="space-y-3 py-4">
+            {/* Step 1: Send to Driver FIRST (if available) */}
+            {lastOrderData?.driver && (
+              <div className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex-1">
+                  <p className="font-medium text-sm">1. Kirim ke Driver</p>
+                  <p className="text-xs text-gray-500">
+                    {lastOrderData.driver.name} - {lastOrderData.driver.plate}
+                  </p>
+                </div>
+                <Button
+                  onClick={sendToDriver}
+                  size="sm"
+                  variant={driverMessageSent ? "outline" : "default"}
+                  disabled={driverMessageSent}
+                >
+                  {driverMessageSent ? (
+                    <>
+                      <Check className="h-4 w-4 mr-1" />
+                      Sent
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-1" />
+                      Template
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* Step 2: Send to Customer SECOND */}
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex-1">
+                <p className="font-medium text-sm">{lastOrderData?.driver ? '2' : '1'}. Hubungi Customer</p>
+                <p className="text-xs text-gray-500">Buka WhatsApp tanpa template pesan</p>
+              </div>
+              <Button
+                onClick={sendToCustomer}
+                size="sm"
+                variant={customerMessageSent ? "outline" : "default"}
+                disabled={customerMessageSent || (lastOrderData?.driver && !driverMessageSent)}
+              >
+                {customerMessageSent ? (
+                  <>
+                    <Check className="h-4 w-4 mr-1" />
+                    Sent
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-1" />
+                    WhatsApp
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Download Receipt Option */}
+            <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+              <div className="flex-1">
+                <p className="font-medium text-sm">Download Receipt</p>
+                <p className="text-xs text-gray-500">Simpan bukti pesanan</p>
+              </div>
+              <Button
+                onClick={handleDownloadReceipt}
+                size="sm"
+                variant="outline"
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Download
+              </Button>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={resetForm}>
+              Tutup
+            </AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

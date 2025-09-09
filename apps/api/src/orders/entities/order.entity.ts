@@ -1,7 +1,20 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Order, OrderStatus, VehicleType, PaymentMethod, PaymentStatus, TripType } from '@prisma/client';
+import { JsonValue } from '@prisma/client/runtime/library';
 
 export class OrderEntity implements Order {
+  operationalFeePercent: number | null;
+  operationalFeeConfig: JsonValue;
+  baseFareCoins: bigint | null;
+  distanceFareCoins: bigint | null;
+  timeFareCoins: bigint | null;
+  airportFareCoins: bigint | null;
+  surgeFareCoins: bigint | null;
+  additionalFareCoins: bigint | null;
+  discountCoins: bigint | null;
+  totalFareCoins: bigint | null;
+  cancellationFeeCoins: bigint | null;
+  
   @ApiProperty({ example: 'order-uuid-here' })
   id: string;
 
@@ -127,4 +140,16 @@ export class OrderEntity implements Order {
 
   @ApiProperty({ example: '2024-08-28T15:35:00Z' })
   updatedAt: Date;
+
+  @ApiProperty({ required: false, type: String, example: null })
+  operationalFeeCoins: bigint | null;
+
+  @ApiProperty({ required: false, example: null })
+  operationalFeeStatus: string | null;
+
+  @ApiProperty({ required: false, example: null })
+  operationalFeeChargedAt: Date | null;
+
+  @ApiProperty({ required: false, example: null })
+  operationalFeeTransactionId: string | null;
 }

@@ -5,6 +5,7 @@ import "./globals.css"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { AuthProvider } from "@/lib/use-auth"
+import { QueryProvider } from "@/lib/query-provider"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -22,9 +23,11 @@ export default function RootLayout({
     <html lang="id" suppressHydrationWarning>
       <body className={inter.className}>
       <AuthProvider>
+      <QueryProvider>
         <Header />
           <main>{children}</main>
           <Footer />
+          </QueryProvider>
         </AuthProvider>
       </body>
     </html>

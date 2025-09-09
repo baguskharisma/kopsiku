@@ -158,4 +158,35 @@ export class PrismaService extends PrismaClient<Prisma.PrismaClientOptions, 'que
       },
     });
   }
+
+  async cleanupExpiredTokens(): Promise<number> {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const result = await this.refreshToken.deleteMany({
+      where: {
+        OR: [
+          { expiresAt: { lt: now } },
+          { 
+            isRevoked: true,
+            revokedAt: { lt: thirtyDaysAgo },
+          },
+        ],
+      },
+    });
+
+    this.logger.log(`Cleaned up ${result.count} expired/revoked tokens`);
+    return result.count;
+  }
+  
+  async cleanupExpiredOtps(): Promise<number> {
+    const result = await this.otp.deleteMany({
+      where: {
+        expiresAt: { lt: new Date() },
+      },
+    });
+
+    this.logger.log(`Cleaned up ${result.count} expired OTPs`);
+    return result.count;
+  }
 }

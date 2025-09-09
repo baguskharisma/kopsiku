@@ -1,3 +1,4 @@
+'use client'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -5,8 +6,30 @@ import { MapPin, Clock, Users, Star, Ticket, Package, Car, Shield, Filter } from
 import Link from "next/link"
 import Image from "next/image"
 import { HeroCarousel } from "@/components/hero-carousel"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+// import { getUserRole } from "@/lib/validations/auth"
+import { getUser } from "../actions/getUser"
 
 export default function HomePage() {
+  // const [role, setRole] = useState<string | null>(null);
+  // const router = useRouter();
+
+  // useEffect(() => {
+  //   (async () => {
+  //     const user = await getUser();
+  //     console.log("User from API:", user);
+  //     setRole(user?.role ?? null);
+
+  //     if (!user || user.role !== "ADMIN") {
+  //       router.replace("/");
+  //     }
+  //   })();
+  // }, [router]);
+
+  // if (!role) return <p>Loading...</p>;
+  // return <div>Halo Admin! Role kamu: {role}</div>;
+
   const carouselImages = [
     {
       src: "/images/hero-carousel-2.jpeg",
@@ -150,6 +173,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
+      {/* <div>Halo Admin! Role kamu: {role}</div>; */}
       {/* Hero Section with Dynamic Carousel */}
       <HeroCarousel images={carouselImages} autoPlayInterval={7000}>
         <div className="max-w-4xl mx-auto">

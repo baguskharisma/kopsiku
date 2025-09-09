@@ -2,9 +2,10 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException, 
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AssignDriverDto } from './dto/assign-driver.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import { OrderStatus, DriverStatus, Prisma, VehicleType } from '@prisma/client';
+import { OrderStatus, DriverStatus, Prisma, VehicleType, CoinTransactionType, CoinTransactionStatus } from '@prisma/client';
 import { OrdersGateway } from './orders.gateway';
 import { PrismaService } from 'src/database/prisma.service';
+import { CoinService } from 'src/coins/coins.service';
 
 // Define proper types for the return value
 export interface FleetWithDriver {
@@ -54,6 +55,49 @@ interface PaginatedResponse<T> {
   };
 }
 
+export interface DriverLocation {
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface FleetInfo {
+  id: string;
+  vehicleType: VehicleType;
+  plateNumber: string;
+  brand: string;
+  model: string;
+  color: string;
+  status: string;
+}
+
+export interface ActiveDriverResponse {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  rating: number;
+  status: DriverStatus;
+  currentLocation: DriverLocation;
+  fleets: FleetInfo[];
+  // Backward compatibility fields
+  plate: string;
+  vehicleType: VehicleType | undefined;
+  fleetId: string | undefined;
+}
+
+export interface GetDriversFilters {
+  vehicleType?: VehicleType;
+  status?: DriverStatus;
+}
+
+interface OperationalFeeResult {
+  success: boolean;
+  transactionId?: string;
+  feeAmount: string;
+  newBalance: string;
+  message: string;
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -63,102 +107,877 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersGateway: OrdersGateway,
+    private readonly coinService: CoinService
   ) {}
 
-  async create(createOrderDto: CreateOrderDto, createdBy?: string) {
-    // Validate fare calculation consistency
-    this.validateFareCalculation(createOrderDto);
+  
+  async getActiveDrivers(filters: GetDriversFilters = {}) {
+    const { vehicleType, status = DriverStatus.ACTIVE } = filters;
 
-    // Generate unique order number
-    const orderNumber = await this.generateOrderNumber();
-
-    // Validate scheduled time if provided
-    if (createOrderDto.scheduledAt) {
-      const scheduledTime = new Date(createOrderDto.scheduledAt);
-      if (scheduledTime <= new Date()) {
-        throw new BadRequestException('Scheduled time must be in the future');
-      }
-    }
-
-    try {
-      const result = await this.prisma.$transaction(async (tx) => {
-        // Create order with PENDING status first
-        const order = await tx.order.create({
-          data: {
-            orderNumber,
-            tripType: createOrderDto.tripType || 'INSTANT',
-            scheduledAt: createOrderDto.scheduledAt ? new Date(createOrderDto.scheduledAt) : null,
-            passengerName: createOrderDto.passengerName,
-            passengerPhone: createOrderDto.passengerPhone,
-            specialRequests: createOrderDto.specialRequests,
-            pickupAddress: createOrderDto.pickupAddress,
-            pickupLat: createOrderDto.pickupCoordinates.lat,
-            pickupLng: createOrderDto.pickupCoordinates.lng,
-            dropoffAddress: createOrderDto.dropoffAddress,
-            dropoffLat: createOrderDto.dropoffCoordinates.lat,
-            dropoffLng: createOrderDto.dropoffCoordinates.lng,
-            requestedVehicleType: createOrderDto.requestedVehicleType,
-            distanceMeters: createOrderDto.distanceMeters,
-            estimatedDurationMinutes: createOrderDto.estimatedDurationMinutes,
-            baseFare: BigInt(createOrderDto.baseFare),
-            distanceFare: BigInt(createOrderDto.distanceFare),
-            airportFare: BigInt(createOrderDto.airportFare || 0),
-            totalFare: BigInt(createOrderDto.totalFare),
-            paymentMethod: createOrderDto.paymentMethod,
-            status: OrderStatus.PENDING,
-            // Leave driver and fleet empty initially
-            fleetId: '',
-            driverId: '',
-          },
+  try {
+    // Start with FleetAssignment to ensure we only get drivers with active assignments
+    const assignments = await this.prisma.fleetAssignment.findMany({
+      where: {
+        isActive: true,
+        fleet: {
+          status: 'ACTIVE',
+          ...(vehicleType && { vehicleType }),
+        },
+        driver: {
+          role: 'DRIVER',
+          // isActive: true,
+          // isVerified: true,
+        }
+      },
+      include: {
+        driver: {
           include: {
-            fleet: true,
-            driver: {
-              select: {
-                id: true,
-                name: true,
-                phone: true,
-                driverProfile: {
-                  select: {
-                    rating: true,
-                    driverStatus: true,
-                    currentLat: true,
-                    currentLng: true,
-                  }
-                }
+            driverProfile: {
+              where: {
+                // driverStatus: status,
+                // isVerified: true,
               }
-            },
-          },
-        });
-
-        // Create status history
-        await tx.orderStatusHistory.create({
-          data: {
-            orderId: order.id,
-            fromStatus: OrderStatus.PENDING,
-            toStatus: OrderStatus.PENDING,
-            reason: 'Order created by operator',
-            changedBy: createdBy,
-          },
-        });
-
-        return order;
-      });
-
-      // Emit order created event
-      this.ordersGateway.emitOrderCreated(result);
-      
-      // Log order creation
-      this.logger.log(`Order created: ${result.orderNumber} by ${createdBy || 'system'}`);
-
-      return this.transformOrderResponse(result);
-    } catch (error) {
-      this.logger.error('Failed to create order', error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('Duplicate order detected');
+            }
+          }
+        },
+        fleet: {
+          select: {
+            id: true,
+            vehicleType: true,
+            plateNumber: true,
+            brand: true,
+            model: true,
+            color: true,
+            status: true,
+            year: true,
+            capacity: true,
+            type: true,
+          }
+        }
+      },
+      orderBy: {
+        driver: {
+          driverProfile: {
+            rating: 'desc'
+          }
         }
       }
+    });
+
+    // Filter out assignments where driver has a valid DriverProfile (array with at least one entry)
+    // const validAssignments = assignments.filter(assignment => 
+    //   Array.isArray(assignment.driver.driverProfile) && assignment.driver.driverProfile.length > 0
+    // );
+
+    const validAssignments = assignments;
+
+    console.log('Raw assignments count:', assignments.length);
+    console.log('Sample assignment:', JSON.stringify(assignments[0], (key, value) =>
+      typeof value === 'bigint' ? value.toString() : value, 2
+    ));
+    console.log('Valid assignments count:', validAssignments.length);
+
+    // Group by driver to avoid duplicates
+    const driverMap = new Map();
+    
+    validAssignments.forEach(assignment => {
+      const driverId = assignment.driver.id;
+      
+      if (!driverMap.has(driverId)) {
+        driverMap.set(driverId, {
+          driver: assignment.driver,
+          assignments: []
+        });
+      }
+      
+      driverMap.get(driverId).assignments.push(assignment);
+    });
+
+    // Transform to expected format
+   // Transform to expected format
+return Array.from(driverMap.values()).map(({ driver, assignments }) => {
+  // Handle both array and single object for driverProfile
+  const driverProfile = driver.driverProfile?.length 
+    ? driver.driverProfile[0] 
+    : driver.driverProfile;
+  
+  return {
+    id: driver.id,
+    name: driver.name,
+    phone: driver.phone,
+    email: driver.email,
+    rating: driverProfile?.rating ?? 0,
+    status: driverProfile?.driverStatus ?? status,
+    isVerified: driverProfile?.isVerified ?? false,
+    currentLocation: driverProfile
+      ? { lat: driverProfile.currentLat, lng: driverProfile.currentLng }
+      : null,
+    lastLocationUpdate: driverProfile?.lastLocationUpdate,
+    fleets: assignments.map(a => ({
+      id: a.fleet.id,
+      vehicleType: a.fleet.vehicleType,
+      plateNumber: a.fleet.plateNumber,
+      brand: a.fleet.brand,
+      model: a.fleet.model,
+      color: a.fleet.color,
+      status: a.fleet.status,
+      year: a.fleet.year,
+      capacity: a.fleet.capacity,
+      type: a.fleet.type,
+    })),
+    // backward compatibility
+    plate: assignments[0]?.fleet.plateNumber ?? '',
+    vehicleType: assignments[0]?.fleet.vehicleType,
+    fleetId: assignments[0]?.fleet.id,
+  };
+});
+
+  } catch (error) {
+    this.logger.error('Error in getActiveDriversSimple:', error);
+    throw error;
+  }
+  }
+
+  async getDriverFleetMapping(driverId: string): Promise<string | null> {
+    try {
+      const assignment = await this.prisma.fleetAssignment.findFirst({
+        where: {
+          driverId: driverId,
+          isActive: true,
+          fleet: {
+            status: 'ACTIVE',
+          }
+        },
+        include: {
+          fleet: {
+            select: {
+              id: true,
+              status: true,
+            }
+          }
+        }
+      });
+  
+      return assignment?.fleet.id || null;
+    } catch (error) {
+      this.logger.error(`Failed to get fleet mapping for driver ${driverId}:`, error);
+      return null;
+    }
+  }
+
+  // async create(createOrderDto: CreateOrderDto, createdBy?: string) {
+  //   // Validate fare calculation consistency
+  //   this.validateFareCalculation(createOrderDto);
+  
+  //   // Generate unique order number
+  //   const orderNumber = await this.generateOrderNumber();
+  
+  //   // Validate scheduled time if provided
+  //   if (createOrderDto.scheduledAt) {
+  //     const scheduledTime = new Date(createOrderDto.scheduledAt);
+  //     if (scheduledTime <= new Date()) {
+  //       throw new BadRequestException('Scheduled time must be in the future');
+  //     }
+  //   }
+  
+  //   // Sanitize input data
+  //   const sanitizedData = {
+  //     ...createOrderDto,
+  //     passengerName: this.sanitizeString(createOrderDto.passengerName),
+  //     passengerPhone: this.sanitizePhoneNumber(createOrderDto.passengerPhone),
+  //     pickupAddress: this.sanitizeString(createOrderDto.pickupAddress),
+  //     dropoffAddress: this.sanitizeString(createOrderDto.dropoffAddress),
+  //     specialRequests: createOrderDto.specialRequests 
+  //       ? this.sanitizeString(createOrderDto.specialRequests) 
+  //       : null,
+  //   };
+
+  //   // Check if operator exists and has sufficient coin balance
+  //   let customerHasWallet = false;
+  //   let operationalFeePreview: OperationalFeeResult | null = null;
+    
+  //   if (createOrderDto.adminId) {
+  //     try {
+  //       const walletBalance = await this.coinService.getWalletBalance(createOrderDto.adminId);
+  //       customerHasWallet = true;
+        
+  //       // Calculate operational fee preview (don't deduct yet)
+  //       const feeAmount = this.calculateOperationalFeeAmount(BigInt(sanitizedData.baseFare));
+        
+  //       if (BigInt(walletBalance) < feeAmount) {
+  //         this.logger.warn(`Customer ${createOrderDto.adminId} has insufficient coins for operational fee`, {
+  //           required: feeAmount.toString(),
+  //           available: walletBalance,
+  //           orderId: 'pending',
+  //         });
+          
+  //         throw new BadRequestException(
+  //           `Insufficient coin balance for operational fee. Required: ${feeAmount.toString()} coins, Available: ${walletBalance} coins. Please top up your account.`
+  //         );
+  //       }
+  //     } catch (error) {
+  //       if (error instanceof BadRequestException) {
+  //         throw error; // Re-throw balance insufficient errors
+  //       }
+        
+  //       this.logger.warn(`Could not check customer coin balance: ${error.message}`, {
+  //         customerId: createOrderDto.adminId,
+  //       });
+  //       // Continue without coin deduction if wallet doesn't exist
+  //     }
+  //   }
+  
+  //   try {
+  //     const result = await this.prisma.$transaction(async (tx) => {
+  //       // Create the order first
+  //       const order = await tx.order.create({
+  //         data: {
+  //           orderNumber,
+  //           tripType: sanitizedData.tripType || 'INSTANT',
+  //           scheduledAt: sanitizedData.scheduledAt ? new Date(sanitizedData.scheduledAt) : null,
+  //           passengerName: sanitizedData.passengerName,
+  //           passengerPhone: sanitizedData.passengerPhone,
+  //           specialRequests: sanitizedData.specialRequests,
+  //           pickupAddress: sanitizedData.pickupAddress,
+  //           pickupLat: sanitizedData.pickupCoordinates.lat,
+  //           pickupLng: sanitizedData.pickupCoordinates.lng,
+  //           dropoffAddress: sanitizedData.dropoffAddress,
+  //           dropoffLat: sanitizedData.dropoffCoordinates.lat,
+  //           dropoffLng: sanitizedData.dropoffCoordinates.lng,
+  //           requestedVehicleType: sanitizedData.requestedVehicleType,
+  //           distanceMeters: sanitizedData.distanceMeters,
+  //           estimatedDurationMinutes: sanitizedData.estimatedDurationMinutes,
+  //           baseFare: BigInt(sanitizedData.baseFare),
+  //           distanceFare: BigInt(sanitizedData.distanceFare),
+  //           airportFare: BigInt(sanitizedData.airportFare || 0),
+  //           totalFare: BigInt(sanitizedData.totalFare),
+  //           paymentMethod: sanitizedData.paymentMethod,
+  //           status: OrderStatus.PENDING,
+  //           driverId: null,
+  //           fleetId: null,
+  //           // Initialize operational fee fields
+  //           operationalFeeStatus: customerHasWallet ? 'PENDING' : 'NOT_APPLICABLE',
+  //           // Create nested status history
+  //           statusHistory: {
+  //             create: {
+  //               fromStatus: OrderStatus.PENDING,
+  //               toStatus: OrderStatus.PENDING,
+  //               reason: 'Order created by operator',
+  //               changedBy: createdBy || null,
+  //             },
+  //           },
+  //         },
+  //         include: {
+  //           statusHistory: true,
+  //         },
+  //       });
+
+  //       // Deduct operational fee if customer has wallet
+  //       if (customerHasWallet && createOrderDto.adminId) {
+  //         try {
+  //           const feeResult = await this.coinService.deductOperationalFee(
+  //             createOrderDto.adminId,
+  //             order.id,
+  //             BigInt(sanitizedData.baseFare)
+  //           );
+            
+  //           this.logger.log(`Operational fee deducted for order ${order.orderNumber}`, {
+  //             orderId: order.id,
+  //             customerId: createOrderDto.adminId,
+  //             feeAmount: feeResult.feeAmount,
+  //             newBalance: feeResult.newBalance,
+  //             transactionId: feeResult.transactionId,
+  //           });
+            
+  //           operationalFeePreview = feeResult;
+            
+  //         } catch (feeError) {
+  //           this.logger.error(`Failed to deduct operational fee for order ${order.orderNumber}`, {
+  //             orderId: order.id,
+  //             customerId: createOrderDto.adminId,
+  //             error: feeError.message,
+  //             stack: feeError.stack,
+  //           });
+            
+  //           // Update order to mark operational fee as failed
+  //           await tx.order.update({
+  //             where: { id: order.id },
+  //             data: {
+  //               operationalFeeStatus: 'FAILED',
+  //               operationalFeeConfig: { 
+  //                 error: feeError.message,
+  //                 failedAt: new Date().toISOString(),
+  //               },
+  //             },
+  //           });
+            
+  //           // Don't fail the entire order creation, just log the warning
+  //           this.logger.warn(`Order ${order.orderNumber} created but operational fee could not be deducted`);
+  //         }
+  //       }
+
+  //       return order;
+  //     }, {
+  //       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  //       timeout: 30000, // 30 seconds timeout
+  //     });
+
+  //     // Transform BigInt fields to strings before emitting events or logging
+  //     const transformedResult = this.transformOrderResponse(result);
+
+  //     // Add operational fee info to response
+  //     if (operationalFeePreview) {
+  //       transformedResult.operationalFee = {
+  //         charged: (operationalFeePreview as OperationalFeeResult | null)?.success || false,
+  //         amount: (operationalFeePreview as OperationalFeeResult | null)?.feeAmount || false,
+  //         transactionId: (operationalFeePreview as OperationalFeeResult | null)?.transactionId || false,
+  //         remainingBalance: (operationalFeePreview as OperationalFeeResult | null)?.newBalance || false,
+  //       };
+  //     }
+
+  //     // Emit order created event with transformed data
+  //     this.ordersGateway.emitOrderCreated(transformedResult);
+      
+  //     this.logger.log(`Order created successfully: ${result.orderNumber} by ${createdBy || 'system'}`, {
+  //       orderId: result.id,
+  //       orderNumber: result.orderNumber,
+  //       passengerName: sanitizedData.passengerName,
+  //       totalFare: result.totalFare.toString(),
+  //       operationalFeeCharged: (operationalFeePreview as OperationalFeeResult | null)?.success || false,
+  //     });
+
+  //     return transformedResult;
+      
+  //   } catch (error) {
+  //     this.logger.error('Failed to create order', {
+  //       error: error.message,
+  //       stack: error.stack,
+  //       createdBy,
+  //       passengerName: sanitizedData.passengerName,
+  //       orderNumber,
+  //     });
+      
+  //     if (error instanceof Prisma.PrismaClientKnownRequestError) {
+  //       if (error.code === 'P2002') {
+  //         throw new ConflictException('Duplicate order detected');
+  //       }
+  //       if (error.code === 'P2003') {
+  //         throw new BadRequestException('Referenced data not found');
+  //       }
+  //     }
+      
+  //     throw error;
+  //   }
+  // }
+
+  async create(createOrderDto: CreateOrderDto, createdBy?: string) {
+    this.validateFareCalculation(createOrderDto);
+    const orderNumber = await this.generateOrderNumber();
+  
+    // Debug logging
+    this.logger.log(`🔍 Order creation started`, {
+      adminId: createOrderDto.adminId,
+      baseFare: createOrderDto.baseFare,
+      orderNumber,
+    });
+  
+    const sanitizedData = {
+      ...createOrderDto,
+      passengerName: this.sanitizeString(createOrderDto.passengerName),
+      passengerPhone: this.sanitizePhoneNumber(createOrderDto.passengerPhone),
+      pickupAddress: this.sanitizeString(createOrderDto.pickupAddress),
+      dropoffAddress: this.sanitizeString(createOrderDto.dropoffAddress),
+      specialRequests: createOrderDto.specialRequests 
+        ? this.sanitizeString(createOrderDto.specialRequests) 
+        : null,
+    };
+  
+    // Pre-validate customer wallet if adminId is provided
+    let customerHasWallet = false;
+    
+    if (createOrderDto.adminId) {
+      try {
+        this.logger.log(`🔍 Checking wallet for customer: ${createOrderDto.adminId}`);
+        
+        const walletBalance = await this.coinService.getWalletBalance(createOrderDto.adminId);
+        customerHasWallet = true;
+        
+        // Calculate required fee
+        const requiredFeeAmount = this.calculateOperationalFeeAmount(BigInt(sanitizedData.distanceFare));
+        
+        this.logger.log(`💰 Wallet validation`, {
+          customerId: createOrderDto.adminId,
+          currentBalance: walletBalance,
+          baseFare: sanitizedData.baseFare,
+          distanceFare: sanitizedData.distanceFare,
+          requiredFee: requiredFeeAmount.toString(),
+          feeCalculationBasis: 'distanceFare', // Added for clarity
+          hasEnoughBalance: BigInt(walletBalance) >= requiredFeeAmount,
+        });
+        
+        if (BigInt(walletBalance) < requiredFeeAmount) {
+          throw new BadRequestException(
+            `Insufficient coin balance. Required: ${requiredFeeAmount.toString()} coins, Available: ${walletBalance}`
+          );
+        }
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        this.logger.error(`❌ Customer wallet check failed:`, {
+          customerId: createOrderDto.adminId,
+          error: (error as Error).message,
+        });
+      }
+    } else {
+      this.logger.warn(`⚠️ No adminId provided, skipping operational fee`);
+    }
+  
+    try {
+      // Create order first
+      this.logger.log(`🔄 Creating order in database...`);
+      const order = await this.prisma.order.create({
+        data: {
+          orderNumber,
+          tripType: sanitizedData.tripType || 'INSTANT',
+          scheduledAt: sanitizedData.scheduledAt ? new Date(sanitizedData.scheduledAt) : null,
+          passengerName: sanitizedData.passengerName,
+          passengerPhone: sanitizedData.passengerPhone,
+          specialRequests: sanitizedData.specialRequests,
+          pickupAddress: sanitizedData.pickupAddress,
+          pickupLat: sanitizedData.pickupCoordinates.lat,
+          pickupLng: sanitizedData.pickupCoordinates.lng,
+          dropoffAddress: sanitizedData.dropoffAddress,
+          dropoffLat: sanitizedData.dropoffCoordinates.lat,
+          dropoffLng: sanitizedData.dropoffCoordinates.lng,
+          requestedVehicleType: sanitizedData.requestedVehicleType,
+          distanceMeters: sanitizedData.distanceMeters,
+          estimatedDurationMinutes: sanitizedData.estimatedDurationMinutes,
+          baseFare: BigInt(sanitizedData.baseFare),
+          distanceFare: BigInt(sanitizedData.distanceFare),
+          airportFare: BigInt(sanitizedData.airportFare || 0),
+          totalFare: BigInt(sanitizedData.totalFare),
+          paymentMethod: sanitizedData.paymentMethod,
+          status: OrderStatus.PENDING,
+          operationalFeeStatus: customerHasWallet ? 'PENDING' : 'NOT_APPLICABLE',
+          statusHistory: {
+            create: {
+              fromStatus: OrderStatus.PENDING,
+              toStatus: OrderStatus.PENDING,
+              reason: 'Order created by operator',
+              changedBy: createdBy || null,
+            },
+          },
+        },
+        include: { statusHistory: true },
+      });
+  
+      this.logger.log(`✅ Order created in database`, {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        operationalFeeStatus: order.operationalFeeStatus,
+      });
+  
+      // Process operational fee if customer has wallet
+      let operationalFeeResult: OperationalFeeResult | null = null;
+      
+      if (customerHasWallet && createOrderDto.adminId) {
+        this.logger.log(`💳 Starting operational fee deduction...`);
+        
+        try {
+          // CRITICAL: Make sure this method exists and is not commented out
+          operationalFeeResult = await this.coinService.deductOperationalFee(
+            createOrderDto.adminId,
+            order.id,
+            order.baseFare,
+            BigInt(sanitizedData.distanceFare)
+          );
+          
+          this.logger.log(`✅ Operational fee processed successfully`, {
+            orderId: order.id,
+            customerId: createOrderDto.adminId,
+            feeAmount: operationalFeeResult.feeAmount,
+            newBalance: operationalFeeResult.newBalance,
+            transactionId: operationalFeeResult.transactionId,
+            success: operationalFeeResult.success,
+          });
+          
+        } catch (feeError) {
+          this.logger.error(`❌ Operational fee processing failed`, {
+            orderId: order.id,
+            customerId: createOrderDto.adminId,
+            error: (feeError as Error).message,
+            stack: (feeError as Error).stack,
+          });
+          
+          // Update order to mark fee as failed
+          await this.prisma.order.update({
+            where: { id: order.id },
+            data: {
+              operationalFeeStatus: 'FAILED',
+              operationalFeeConfig: { 
+                error: (feeError as Error).message,
+                failedAt: new Date().toISOString(),
+              },
+            },
+          });
+          
+          // IMPORTANT: Decide whether to fail entire order or continue
+          // For debugging, let's continue but log the error
+          this.logger.warn(`⚠️ Order created but operational fee failed - continuing anyway`);
+        }
+      } else {
+        this.logger.log(`ℹ️ Skipping operational fee`, {
+          customerHasWallet,
+          adminId: createOrderDto.adminId,
+        });
+      }
+  
+      const transformedResult = this.transformOrderResponse(order);
+  
+      // Add operational fee info to response
+      if (operationalFeeResult && operationalFeeResult.success) {
+        transformedResult.operationalFee = {
+          charged: operationalFeeResult.success,
+          amount: operationalFeeResult.feeAmount,
+          transactionId: operationalFeeResult.transactionId || '',
+          remainingBalance: operationalFeeResult.newBalance,
+        };
+      }
+  
+      // Emit events
+      this.ordersGateway.emitOrderCreated(transformedResult);
+      
+      this.logger.log(`🎉 Order creation completed`, {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        totalFare: order.totalFare.toString(),
+        operationalFeeCharged: operationalFeeResult?.success || false,
+        operationalFeeAmount: operationalFeeResult?.feeAmount || 'N/A',
+      });
+  
+      return transformedResult;
+      
+    } catch (error) {
+      this.logger.error(`💥 Order creation failed`, {
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+        orderNumber,
+        passengerName: sanitizedData.passengerName,
+        adminId: createOrderDto.adminId,
+      });
       throw error;
+    }
+  }
+  
+  // 2. CRITICAL CHECK: Pastikan method deductOperationalFee tidak di-comment
+  // Di coins.service.ts - UNCOMMENT method ini:
+  
+  async deductOperationalFee(
+    userId: string, 
+    orderId: string, 
+    distanceFareAmount: bigint
+  ): Promise<OperationalFeeResult> {
+    // Debug logging
+    this.logger.log(`🔍 deductOperationalFee called`, {
+      userId,
+      orderId,
+      distanceFareAmount: distanceFareAmount.toString(),
+    });
+  
+    const feeConfig = await this.getOperationalFeeConfig();
+    const feeAmount = this.calculateOperationalFee(distanceFareAmount, feeConfig.percentageOfBaseFare);
+  
+    this.logger.log(`💰 Fee calculation`, {
+      userId,
+      orderId,
+      distanceFareAmount: distanceFareAmount.toString(),
+      feePercentage: feeConfig.percentageOfBaseFare,
+      calculatedFee: feeAmount.toString(),
+    });
+  
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Get current wallet with version for optimistic locking
+        const wallet = await tx.coinWallet.findUnique({
+          where: { userId },
+        });
+  
+        if (!wallet) {
+          throw new BadRequestException('Coin wallet not found. Please contact support.');
+        }
+  
+        this.logger.log(`💳 Current wallet state`, {
+          userId,
+          balance: wallet.balance.toString(),
+          totalSpent: wallet.totalSpent.toString(),
+          totalOperationalFees: wallet.totalOperationalFees.toString(),
+          version: wallet.version,
+          isFrozen: wallet.isFrozen,
+        });
+  
+        if (wallet.isFrozen) {
+          throw new BadRequestException('Wallet is frozen. Cannot process operational fee.');
+        }
+  
+        if (wallet.balance < feeAmount) {
+          throw new BadRequestException(
+            `Insufficient coins. Required: ${feeAmount.toString()}, Available: ${wallet.balance.toString()}`
+          );
+        }
+  
+        const newBalance = wallet.balance - feeAmount;
+        const newTotalSpent = wallet.totalSpent + feeAmount;
+        const newTotalOperationalFees = wallet.totalOperationalFees + feeAmount;
+  
+        this.logger.log(`🔄 Updating wallet`, {
+          userId,
+          oldBalance: wallet.balance.toString(),
+          deductAmount: feeAmount.toString(),
+          newBalance: newBalance.toString(),
+          oldTotalSpent: wallet.totalSpent.toString(),
+          newTotalSpent: newTotalSpent.toString(),
+          oldTotalOperationalFees: wallet.totalOperationalFees.toString(),
+          newTotalOperationalFees: newTotalOperationalFees.toString(),
+        });
+  
+        // Update wallet with optimistic locking
+        const updatedWallet = await tx.coinWallet.update({
+          where: { 
+            userId,
+            version: wallet.version, // Optimistic locking
+          },
+          data: {
+            balance: newBalance,
+            totalSpent: newTotalSpent,
+            totalOperationalFees: newTotalOperationalFees,
+            version: { increment: 1 },
+            lastTransactionAt: new Date(),
+          },
+        });
+  
+        this.logger.log(`✅ Wallet updated successfully`, {
+          userId,
+          newBalance: updatedWallet.balance.toString(),
+          newVersion: updatedWallet.version,
+        });
+  
+        // Create transaction record
+        const transaction = await tx.coinTransaction.create({
+          data: {
+            userId,
+            type: CoinTransactionType.OPERATIONAL_FEE,
+            status: CoinTransactionStatus.COMPLETED,
+            amount: -feeAmount, // Negative for deduction
+            description: `Operational fee for order ${orderId}`,
+            balanceBefore: wallet.balance,
+            balanceAfter: newBalance,
+            referenceType: 'order',
+            referenceId: orderId,
+            orderId,
+            distanceFareAmount, // FIXED: Use actual baseFareAmount
+            feePercentage: feeConfig.percentageOfBaseFare,
+            operationalFeeConfig: feeConfig.percentageOfBaseFare,
+            processedAt: new Date(),
+            idempotencyKey: `operational-fee-${orderId}`,
+          },
+        });
+  
+        this.logger.log(`📝 Transaction record created`, {
+          transactionId: transaction.id,
+          userId,
+          orderId,
+          amount: transaction.amount.toString(),
+        });
+  
+        // Update order with operational fee info
+        await tx.order.update({
+          where: { id: orderId },
+          data: {
+            operationalFeeCoins: feeAmount,
+            operationalFeePercent: feeConfig.percentageOfBaseFare,
+            operationalFeeStatus: 'CHARGED',
+            operationalFeeChargedAt: new Date(),
+            operationalFeeTransactionId: transaction.id,
+            operationalFeeConfig: feeConfig.percentageOfBaseFare,
+          },
+        });
+  
+        this.logger.log(`📋 Order updated with fee info`, {
+          orderId,
+          feeAmount: feeAmount.toString(),
+          transactionId: transaction.id,
+        });
+  
+        return {
+          transaction,
+          newBalance: updatedWallet.balance,
+        };
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+  
+      this.logger.log(`🎉 Operational fee deducted successfully`, {
+        userId,
+        orderId,
+        feeAmount: feeAmount.toString(),
+        newBalance: result.newBalance.toString(),
+        transactionId: result.transaction.id,
+      });
+  
+      return {
+        success: true,
+        transactionId: result.transaction.id,
+        feeAmount: feeAmount.toString(),
+        newBalance: result.newBalance.toString(),
+        message: 'Operational fee deducted successfully',
+      };
+  
+    } catch (error) {
+      this.logger.error(`💥 Failed to deduct operational fee`, {
+        userId,
+        orderId,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+      });
+  
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') {
+          throw new ConflictException('Wallet was modified by another transaction. Please try again.');
+        }
+      }
+  
+      throw error;
+    }
+  }
+  
+  // 3. CHECK: Pastikan method calculateOperationalFee ada dan benar
+  private calculateOperationalFee(baseFareAmount: bigint, feePercentage: number): bigint {
+    const feeAmount = (baseFareAmount * BigInt(Math.round(feePercentage * 100))) / BigInt(10000);
+    this.logger.log(`🧮 Fee calculation detail`, {
+      baseFareAmount: baseFareAmount.toString(),
+      feePercentage,
+      multiplier: Math.round(feePercentage * 100),
+      calculated: feeAmount.toString(),
+    });
+    return feeAmount;
+  }
+  
+  // 4. CHECK: Pastikan getOperationalFeeConfig mengembalikan nilai yang benar
+  private async getOperationalFeeConfig() {
+    const config = {
+      percentageOfBaseFare: 0.10, // 10%
+      minimumFeeCoins: BigInt(1000), // 1,000 coins minimum
+      maximumFeeCoins: BigInt(100000), // 100,000 coins maximum
+    };
+    
+    this.logger.log(`⚙️ Operational fee config`, config);
+    return config;
+  }
+
+  // FIXED: Process operational fee within transaction context
+  // private async processOperationalFeeInTransaction(
+  //   tx: any,
+  //   customerId: string,
+  //   orderId: string,
+  //   feeAmount: bigint
+  // ) {
+  //   // Get current wallet
+  //   const wallet = await tx.coinWallet.findUnique({
+  //     where: { userId: customerId },
+  //   });
+
+  //   if (!wallet) {
+  //     throw new BadRequestException('Customer wallet not found');
+  //   }
+
+  //   if (wallet.isFrozen) {
+  //     throw new BadRequestException('Wallet is frozen');
+  //   }
+
+  //   if (wallet.balance < feeAmount) {
+  //     throw new BadRequestException(
+  //       `Insufficient balance. Required: ${feeAmount.toString()}, Available: ${wallet.balance.toString()}`
+  //     );
+  //   }
+
+  //   const newBalance = wallet.balance - feeAmount;
+
+  //   // Update wallet balance
+  //   const updatedWallet = await tx.coinWallet.update({
+  //     where: { 
+  //       userId: customerId,
+  //       version: wallet.version, // Optimistic locking
+  //     },
+  //     data: {
+  //       balance: newBalance,
+  //       totalSpent: wallet.totalSpent + feeAmount,
+  //       totalOperationalFees: wallet.totalOperationalFees + feeAmount,
+  //       version: { increment: 1 },
+  //       lastTransactionAt: new Date(),
+  //     },
+  //   });
+
+  //   // Create transaction record
+  //   const transaction = await tx.coinTransaction.create({
+  //     data: {
+  //       userId: customerId,
+  //       type: 'OPERATIONAL_FEE',
+  //       status: 'COMPLETED',
+  //       amount: -feeAmount, // Negative for deduction
+  //       description: `Operational fee for order ${orderId}`,
+  //       balanceBefore: wallet.balance,
+  //       balanceAfter: newBalance,
+  //       referenceType: 'order',
+  //       referenceId: orderId,
+  //       orderId,
+  //       baseFareAmount: wallet.balance, // Store original base fare if needed
+  //       processedAt: new Date(),
+  //       idempotencyKey: `operational-fee-${orderId}`,
+  //     },
+  //   });
+
+  //   this.logger.log(`Operational fee processed within transaction`, {
+  //     customerId,
+  //     orderId,
+  //     previousBalance: wallet.balance.toString(),
+  //     deductedAmount: feeAmount.toString(),
+  //     newBalance: newBalance.toString(),
+  //     transactionId: transaction.id,
+  //   });
+
+  //   return {
+  //     success: true,
+  //     transactionId: transaction.id,
+  //     feeAmount: feeAmount.toString(),
+  //     newBalance: newBalance.toString(),
+  //     message: 'Operational fee processed successfully',
+  //   };
+  // }
+
+  private calculateOperationalFeeAmount(baseFareAmount: bigint): bigint {
+    const feePercentage = 0.10; // 10%
+    return (baseFareAmount * BigInt(Math.round(feePercentage * 100))) / BigInt(10000);
+  }
+   // Helper method to transform BigInt fields to strings
+   private transformOrderResponse(order: any) {
+    return {
+      ...order,
+      baseFare: order.baseFare.toString(),
+      distanceFare: order.distanceFare.toString(),
+      airportFare: order.airportFare.toString(),
+      totalFare: order.totalFare.toString(),
+    };
+  }
+
+  private validateFareCalculation(createOrderDto: CreateOrderDto) {
+    const { baseFare, distanceFare, airportFare = 0, totalFare } = createOrderDto;
+    const calculatedTotal = baseFare + distanceFare + airportFare;
+    
+    if (Math.abs(calculatedTotal - totalFare) > 1000) {
+      throw new BadRequestException(
+        `Fare calculation mismatch. Expected: ${calculatedTotal}, Received: ${totalFare}`
+      );
     }
   }
 
@@ -176,7 +995,6 @@ export class OrdersService {
     }
 
     if (order.status !== OrderStatus.PENDING && order.status !== OrderStatus.NO_DRIVER_AVAILABLE) {
-      throw new BadRequestException(`Cannot assign driver to order with status: ${order.status}`);
     }
 
     // Validate driver availability and permissions
@@ -263,7 +1081,13 @@ export class OrdersService {
 
       return this.transformOrderResponse(result);
     } catch (error) {
-      this.logger.error('Failed to assign driver', error);
+      this.logger.error('Failed to assign driver', {
+        error: error.message,
+        orderId,
+        driverId: assignDriverDto.driverId,
+        assignedBy,
+      });
+      
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2025') {
           throw new NotFoundException('Order or driver not found');
@@ -376,12 +1200,13 @@ export class OrdersService {
             
             // Update driver statistics
             await tx.driverProfile.update({
-              where: { userId: order.driverId },
+              where: { userId: order.driverId ?? undefined },
               data: {
                 driverStatus: newDriverStatus,
                 statusChangedAt: new Date(),
                 completedTrips: { increment: 1 },
                 totalTrips: { increment: 1 },
+                totalEarnings: { increment: updatedOrder.totalFare },
               },
             });
           } else if (updateOrderStatusDto.status.startsWith('CANCELLED')) {
@@ -390,7 +1215,7 @@ export class OrdersService {
             
             // Update driver statistics
             await tx.driverProfile.update({
-              where: { userId: order.driverId },
+              where: { userId: order.driverId ?? undefined },
               data: {
                 driverStatus: newDriverStatus,
                 statusChangedAt: new Date(),
@@ -424,139 +1249,161 @@ export class OrdersService {
       // Emit real-time events
       this.ordersGateway.emitOrderStatusUpdated(result);
       
-      if (order.driver?.driverProfile && 
-          (updateOrderStatusDto.status === OrderStatus.COMPLETED || 
-           updateOrderStatusDto.status.startsWith('CANCELLED'))) {
-        this.ordersGateway.emitDriverStatusChanged(order.driverId, DriverStatus.ACTIVE);
+      if (
+        order.driver?.driverProfile &&
+        (
+          updateOrderStatusDto.status === OrderStatus.COMPLETED ||
+          (typeof updateOrderStatusDto.status === 'string' && updateOrderStatusDto.status.startsWith('CANCELLED'))
+        )
+      ) {
+        if (order.driverId) {
+          this.ordersGateway.emitDriverStatusChanged(order.driverId, DriverStatus.ACTIVE);
+        }
       }
 
       this.logger.log(`Order ${result.orderNumber} status updated to ${updateOrderStatusDto.status} by ${userId || 'system'}`);
 
       return this.transformOrderResponse(result);
     } catch (error) {
-      this.logger.error('Failed to update order status', error);
+      this.logger.error('Failed to update order status', {
+        error: error.message,
+        orderId,
+        status: updateOrderStatusDto.status,
+        userId,
+      });
       throw error;
     }
   }
 
   // Enhanced method to find available drivers
   async findAvailableDrivers(
-    vehicleType: VehicleType, 
-    pickupCoordinates: { lat: number; lng: number },
-    radiusKm: number = 10
-  ): Promise<FleetWithDriver[]> {
-    const availableFleetWithDrivers = await this.prisma.fleet.findMany({
-      where: {
-        vehicleType: vehicleType,
-        status: 'ACTIVE',
-        assignments: {
-          some: {
-            isActive: true,
-            driver: {
+  vehicleType: VehicleType, 
+  pickupCoordinates: { lat: number; lng: number },
+  radiusKm: number = 10
+): Promise<FleetWithDriver[]> {
+  const availableFleetWithDrivers = await this.prisma.fleet.findMany({
+    where: {
+      vehicleType: vehicleType,
+      status: 'ACTIVE',
+      assignments: {
+        some: {
+          isActive: true,
+          driver: {
+            driverProfile: {
+              driverStatus: 'ACTIVE',
+              isVerified: true,
+              currentLat: { not: null },
+              currentLng: { not: null },
+            }
+          }
+        }
+      }
+    },
+    include: {
+      assignments: {
+        where: { isActive: true },
+        include: {
+          driver: {
+            select: {
+              id: true,
+              name: true,
+              phone: true, // Include phone
               driverProfile: {
-                driverStatus: 'ACTIVE',
-                isVerified: true,
-                currentLat: { not: null },
-                currentLng: { not: null },
+                select: {
+                  id: true,
+                  rating: true,
+                  driverStatus: true,
+                  currentLat: true,
+                  currentLng: true,
+                  isVerified: true,
+                  totalTrips: true,
+                  completedTrips: true,
+                }
               }
             }
           }
         }
-      },
-      include: {
-        assignments: {
-          where: { isActive: true },
-          include: {
-            driver: {
-              include: {
-                driverProfile: true
-              }
-            }
-          }
-        }
-      },
-      take: 20, // Limit initial results
-    });
-
-    const eligibleDrivers: FleetWithDriver[] = [];
-
-    for (const fleet of availableFleetWithDrivers) {
-      if (!fleet.assignments.length || !fleet.assignments[0].driver?.driverProfile) {
-        continue;
       }
+    },
+    take: 20,
+  });
 
-      const assignment = fleet.assignments[0];
-      const driver = assignment.driver;
-      const profile = driver.driverProfile;
+  const eligibleDrivers: FleetWithDriver[] = [];
 
-      // Calculate distance if coordinates are available
-      if (profile && profile.currentLat != null && profile.currentLng != null) {
-        const distance = this.calculateDistance(
-          pickupCoordinates.lat,
-          pickupCoordinates.lng,
-          profile.currentLat,
-          profile.currentLng
-        );
-
-        if (distance <= radiusKm) {
-          eligibleDrivers.push({
-            fleet: {
-              id: fleet.id,
-              vehicleType: fleet.vehicleType,
-              status: fleet.status,
-              plateNumber: fleet.plateNumber,
-              brand: fleet.brand,
-              model: fleet.model,
-              color: fleet.color,
-            },
-            driver: {
-              id: driver.id,
-              name: driver.name,
-              phone: driver.phone,
-              driverProfile: {
-                id: profile.id,
-                rating: profile.rating || 0,
-                driverStatus: profile.driverStatus,
-                currentLat: profile.currentLat,
-                currentLng: profile.currentLng,
-                isVerified: profile.isVerified,
-                totalTrips: profile.totalTrips,
-                completedTrips: profile.completedTrips,
-              }
-            }
-          });
-        }
-      }
+  for (const fleet of availableFleetWithDrivers) {
+    if (!fleet.assignments.length || !fleet.assignments[0].driver?.driverProfile) {
+      continue;
     }
 
-    // Sort by distance and rating
-    return eligibleDrivers.sort((a, b) => {
-      const distanceA = this.calculateDistance(
+    const assignment = fleet.assignments[0];
+    const driver = assignment.driver;
+    const profile = driver.driverProfile;
+
+    if (profile && profile.currentLat != null && profile.currentLng != null) {
+      const distance = this.calculateDistance(
         pickupCoordinates.lat,
         pickupCoordinates.lng,
-        a.driver.driverProfile.currentLat!,
-        a.driver.driverProfile.currentLng!
-      );
-      const distanceB = this.calculateDistance(
-        pickupCoordinates.lat,
-        pickupCoordinates.lng,
-        b.driver.driverProfile.currentLat!,
-        b.driver.driverProfile.currentLng!
+        profile.currentLat,
+        profile.currentLng
       );
 
-      // Primary sort by distance, secondary by rating
-      if (Math.abs(distanceA - distanceB) < 1) { // If distances are similar (within 1km)
-        return b.driver.driverProfile.rating - a.driver.driverProfile.rating;
+      if (distance <= radiusKm) {
+        eligibleDrivers.push({
+          fleet: {
+            id: fleet.id,
+            vehicleType: fleet.vehicleType,
+            status: fleet.status,
+            plateNumber: fleet.plateNumber,
+            brand: fleet.brand,
+            model: fleet.model,
+            color: fleet.color,
+          },
+          driver: {
+            id: driver.id,
+            name: driver.name,
+            phone: driver.phone, // Include phone in response
+            driverProfile: {
+              id: profile.id,
+              rating: profile.rating || 0,
+              driverStatus: profile.driverStatus,
+              currentLat: profile.currentLat,
+              currentLng: profile.currentLng,
+              isVerified: profile.isVerified,
+              totalTrips: profile.totalTrips,
+              completedTrips: profile.completedTrips,
+            }
+          }
+        });
       }
-      return distanceA - distanceB;
-    });
+    }
   }
+
+  return eligibleDrivers.sort((a, b) => {
+    const distanceA = this.calculateDistance(
+      pickupCoordinates.lat,
+      pickupCoordinates.lng,
+      a.driver.driverProfile.currentLat!,
+      a.driver.driverProfile.currentLng!
+    );
+    const distanceB = this.calculateDistance(
+      pickupCoordinates.lat,
+      pickupCoordinates.lng,
+      b.driver.driverProfile.currentLat!,
+      b.driver.driverProfile.currentLng!
+    );
+
+    if (Math.abs(distanceA - distanceB) < 1) {
+      return b.driver.driverProfile.rating - a.driver.driverProfile.rating;
+    }
+    return distanceA - distanceB;
+  });
+}
 
   // Helper method to validate driver assignment
   private async validateDriverAssignment(
     driverId: string, 
-    fleetId: string, 
-    requiredVehicleType: VehicleType
+    fleetId?: string, 
+    requiredVehicleType?: VehicleType
   ): Promise<void> {
     const driver = await this.prisma.user.findUnique({
       where: { id: driverId },
@@ -774,6 +1621,42 @@ export class OrdersService {
     return transitions[currentStatus] || [];
   }
 
+  // private async generateOrderNumber(): Promise<string> {
+  //   const today = new Date();
+  //   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+    
+  //   const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  //   const endOfDay = new Date(startOfDay);
+  //   endOfDay.setDate(endOfDay.getDate() + 1);
+
+  //   const todayOrderCount = await this.prisma.order.count({
+  //     where: {
+  //       createdAt: {
+  //         gte: startOfDay,
+  //         lt: endOfDay,
+  //       },
+  //     },
+  //   });
+
+  //   const sequence = (todayOrderCount + 1).toString().padStart(3, '0');
+  //   return `TXB-${dateStr}-${sequence}`;
+  // }
+
+  // private validateFareCalculation(createOrderDto: CreateOrderDto) {
+  //   const { baseFare, distanceFare, airportFare = 0, totalFare } = createOrderDto;
+  //   const calculatedTotal = baseFare + distanceFare + airportFare;
+    
+  //   if (Math.abs(calculatedTotal - totalFare) > 1000) { // Allow 10 rupiah difference
+  //     throw new BadRequestException(
+  //       `Fare calculation mismatch. Expected: ${calculatedTotal}, Received: ${totalFare}`
+  //     );
+  //   }
+
+  //   if (totalFare < baseFare) {
+  //     throw new BadRequestException('Total fare cannot be less than base fare');
+  //   }
+  // }
+
   private async generateOrderNumber(): Promise<string> {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -792,22 +1675,17 @@ export class OrdersService {
     });
 
     const sequence = (todayOrderCount + 1).toString().padStart(3, '0');
-    return `TXB-${dateStr}-${sequence}`;
+    return `TXK-${dateStr}-${sequence}`;
   }
 
-  private validateFareCalculation(createOrderDto: CreateOrderDto) {
-    const { baseFare, distanceFare, airportFare = 0, totalFare } = createOrderDto;
-    const calculatedTotal = baseFare + distanceFare + airportFare;
-    
-    if (Math.abs(calculatedTotal - totalFare) > 100) {
-      throw new BadRequestException(
-        `Fare calculation mismatch. Expected: ${calculatedTotal}, Received: ${totalFare}`
-      );
-    }
+  private sanitizeString(input: string): string {
+    if (!input) return input;
+    return input.trim().replace(/[<>\"'&]/g, '');
+  }
 
-    if (totalFare < baseFare) {
-      throw new BadRequestException('Total fare cannot be less than base fare');
-    }
+  private sanitizePhoneNumber(phone: string): string {
+    if (!phone) return phone;
+    return phone.replace(/[^\d+]/g, '');
   }
 
   private async createStatusHistory(
@@ -831,18 +1709,30 @@ export class OrdersService {
     });
   }
 
-  private transformOrderResponse(order: any) {
-    return {
-      ...order,
-      baseFare: Number(order.baseFare),
-      distanceFare: Number(order.distanceFare),
-      timeFare: Number(order.timeFare),
-      airportFare: Number(order.airportFare),
-      surgeFare: Number(order.surgeFare),
-      additionalFare: Number(order.additionalFare),
-      discount: Number(order.discount),
-      totalFare: Number(order.totalFare),
-      cancellationFee: Number(order.cancellationFee),
-    };
-  }
+  // private transformOrderResponse(order: any) {
+  //   return {
+  //     ...order,
+  //     baseFare: Number(order.baseFare),
+  //     distanceFare: Number(order.distanceFare),
+  //     timeFare: Number(order.timeFare),
+  //     airportFare: Number(order.airportFare),
+  //     surgeFare: Number(order.surgeFare),
+  //     additionalFare: Number(order.additionalFare),
+  //     discount: Number(order.discount),
+  //     totalFare: Number(order.totalFare),
+  //     cancellationFee: Number(order.cancellationFee),
+  //   };
+  // }
+
+  // Security helper methods
+  // private sanitizeString(input: string): string {
+  //   if (!input) return input;
+  //   return input.trim().replace(/[<>\"'&]/g, '');
+  // }
+
+  // private sanitizePhoneNumber(phone: string): string {
+  //   if (!phone) return phone;
+  //   // Remove all non-numeric characters except +
+  //   return phone.replace(/[^\d+]/g, '');
+  // }
 }

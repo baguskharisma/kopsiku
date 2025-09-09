@@ -51,7 +51,7 @@ export function calculateDistance(lat1: number, lng1: number, lat2: number, lng2
                          (destinationAddress && isAirportLocation(destinationAddress));
     const appliedAirportFare = isAirportTrip ? airportFareAmount : 0;
     const totalFare = additionalFare + appliedAirportFare;
-  
+    
     return {
       distance: distanceKm,
       baseFare,

@@ -5,14 +5,16 @@ import Link from "next/link"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import { Menu, User, Phone, LogIn } from "lucide-react"
+import { Menu, User, Phone, LogIn, Coins } from "lucide-react"
 import { MobileNav } from "@/components/mobile-nav"
 import { LogoutButton } from "./auth/logout-button"
 import { useAuth } from "@/lib/use-auth"
+import { useCoins } from "@/hooks/use-coins"
 
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
   const { isAuthenticated, isLoading } = useAuth()
+  const { data: coins, isLoading: coinsLoading, isError } = useCoins()
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -67,6 +69,20 @@ export function Header() {
             </Link>
           </div>
           <nav className="flex items-center space-x-2">
+          {isAuthenticated && (
+          <div className="hidden md:flex items-center space-x-3">
+            {coinsLoading ? (
+              <div className="px-2 py-1 rounded-full text-sm">—</div>
+            ) : isError ? (
+              <div className="px-2 py-1 rounded-full text-sm text-red-600">err</div>
+            ) : (
+              <div className="flex items-center px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                <Coins className="h-4 w-4 mr-1" />
+                {(typeof coins === "number" ? coins.toLocaleString("id-ID") : "0")} coin
+              </div>
+            )}
+          </div>
+          )}
             {isAuthenticated && (
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/profile">

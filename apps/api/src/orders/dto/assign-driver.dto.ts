@@ -8,9 +8,9 @@ export class AssignDriverDto {
   driverId: string;
 
   @ApiProperty({ example: 'fleet-uuid-here', description: 'Fleet ID to assign' })
+  @IsOptional()
   @IsString({ message: 'Fleet ID must be a string' })
-  @IsNotEmpty({ message: 'Fleet ID is required' })
-  fleetId: string;
+  fleetId?: string;
 
   @ApiProperty({ example: 'Closest available driver', description: 'Assignment reason', required: false })
   @IsOptional()

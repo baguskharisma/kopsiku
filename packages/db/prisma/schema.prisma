@@ -41,6 +41,7 @@ enum PaymentMethod {
   EWALLET
   CREDIT_CARD
   DEBIT_CARD
+  COINS          // Added for coin payment
 }
 
 enum OrderStatus {
@@ -98,13 +99,33 @@ enum PaymentStatus {
   CANCELLED
 }
 
+// New enums for coin system
+enum CoinTransactionType {
+  TOP_UP          // Manual top up by admin
+  DEDUCTION       // Deduction for order operational fee
+  REFUND          // Refund for cancelled orders
+  BONUS           // Promotional bonus
+  ADJUSTMENT      // Manual adjustment by admin
+  OPERATIONAL_FEE // Operational fee deduction (10% of base fare)
+  COMMISSION      // Platform commission
+}
+
+enum CoinTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+  EXPIRED
+  PROCESSING      // Added for better status tracking
+}
+
 // Models
 model User {
   id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   name         String
   username     String?        @unique
   email        String?        @unique
-  phone        String         @unique // Required for taxi app
+  phone        String         @unique
   passwordHash String         @map("password_hash")
   role         Role           @default(CUSTOMER)
   avatarUrl    String?        @map("avatar_url")
@@ -115,17 +136,24 @@ model User {
   updatedAt    DateTime       @updatedAt @map("updated_at")
   deletedAt    DateTime?      @map("deleted_at")
 
-  // Relations
-  driverProfile     DriverProfile?
-  fleetAssignments  FleetAssignment[]
-  orders            Order[]           @relation("CustomerOrders")
-  driverOrders      Order[]           @relation("DriverOrders")
-  refreshTokens     RefreshToken[]
-  otps              Otp[]
-  auditLogs         AuditLog[]
-  userLocations     UserLocation[]
-  ratings           Rating[]          @relation("UserRatings")
-  receivedRatings   Rating[]          @relation("DriverRatings")
+  // Relations (existing + new)
+  driverProfile        DriverProfile?
+  fleetAssignments     FleetAssignment[]
+  orders               Order[]           @relation("CustomerOrders")
+  driverOrders         Order[]           @relation("DriverOrders")
+  refreshTokens        RefreshToken[]
+  otps                 Otp[]
+  auditLogs            AuditLog[]
+  userLocations        UserLocation[]
+  ratings              Rating[]          @relation("UserRatings")
+  receivedRatings      Rating[]          @relation("DriverRatings")
+  
+  // Coin-related relations
+  coinWallet           CoinWallet?
+  coinTransactions     CoinTransaction[]
+  topUpRequests        CoinTopUpRequest[] @relation("CustomerTopUpRequests")
+  processedTopUps      CoinTopUpRequest[] @relation("AdminProcessedTopUps")
+  coinSpendingLimit    CoinSpendingLimit? // New relation
 
   @@index([phone])
   @@index([email])
@@ -183,6 +211,183 @@ model DriverProfile {
   @@index([isVerified])
   @@index([currentLat, currentLng]) // Geospatial queries
   @@map("driver_profiles")
+}
+
+// New Coin Models
+model CoinWallet {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String   @unique @map("user_id") @db.VarChar
+  
+  balance       BigInt   @default(0) // Balance in smallest coin unit
+  totalTopUp    BigInt   @default(0) @map("total_top_up")
+  totalSpent    BigInt   @default(0) @map("total_spent")
+  totalOperationalFees BigInt @default(0) @map("total_operational_fees") // Track operational fees separately
+  
+  // Enhanced security
+  version       Int      @default(1) // For optimistic locking
+  lastTransactionAt DateTime? @map("last_transaction_at")
+  
+  // Status and security
+  isActive      Boolean  @default(true) @map("is_active")
+  isFrozen      Boolean  @default(false) @map("is_frozen")
+  frozenReason  String?  @map("frozen_reason")
+  frozenAt      DateTime? @map("frozen_at")
+  frozenBy      String?  @map("frozen_by")
+  
+  // Limits for security
+  dailySpendLimit BigInt? @map("daily_spend_limit")
+  monthlySpendLimit BigInt? @map("monthly_spend_limit")
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  @@index([userId])
+  @@index([isActive, isFrozen])
+  @@index([lastTransactionAt])
+  @@map("coin_wallets")
+}
+
+model CoinTransaction {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String                @map("user_id") @db.VarChar
+  
+  // Transaction details
+  type            CoinTransactionType
+  status          CoinTransactionStatus @default(PENDING)
+  amount          BigInt                // Positive for credit, negative for debit
+  description     String
+  
+  // Balance tracking (important for audit)
+  balanceBefore   BigInt                @map("balance_before")
+  balanceAfter    BigInt                @map("balance_after")
+  
+  // Reference data
+  referenceType   String?               @map("reference_type") // "order", "top_up_request", "manual", "operational_fee"
+  referenceId     String?               @map("reference_id")
+  orderId         String?               @map("order_id") @db.VarChar
+  topUpRequestId  String?               @map("top_up_request_id") @db.VarChar
+  
+  // Operational fee specific data
+  operationalFeeConfig Json?            @map("operational_fee_config") // Snapshot of fee config used
+  distanceFareAmount  BigInt?           @map("distance_fare_amount") // Distance fare amount for operational fee calculation
+  feePercentage   Float?                @map("fee_percentage") // Fee percentage used
+  
+  // Processing info
+  processedBy     String?               @map("processed_by")
+  processedAt     DateTime?             @map("processed_at")
+  
+  // Additional data
+  metadata        Json?
+  notes           String?
+  
+  // Security and integrity
+  idempotencyKey  String?               @unique @map("idempotency_key")
+  transactionHash String?               @map("transaction_hash") // For additional security
+  
+  // Audit trail
+  ipAddress       String?               @map("ip_address")
+  userAgent       String?               @map("user_agent")
+  
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  order           Order?                @relation(fields: [orderId], references: [id])
+  topUpRequest    CoinTopUpRequest?     @relation(fields: [topUpRequestId], references: [id])
+  
+  @@index([userId, createdAt])
+  @@index([type, status])
+  @@index([referenceType, referenceId])
+  @@index([orderId])
+  @@index([topUpRequestId])
+  @@index([createdAt])
+  @@index([status, processedAt])
+  @@map("coin_transactions")
+}
+
+model CoinTopUpRequest {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  requestNumber   String                @unique @map("request_number") // Human-readable request ID
+  
+  // User and admin relations
+  customer        User                  @relation("CustomerTopUpRequests", fields: [customerId], references: [id])
+  customerId      String                @map("customer_id") @db.VarChar
+  processedBy     User?                 @relation("AdminProcessedTopUps", fields: [processedById], references: [id])
+  processedById   String?               @map("processed_by_id") @db.VarChar
+  
+  // Request details
+  requestedAmount BigInt                @map("requested_amount")
+  approvedAmount  BigInt?               @map("approved_amount")
+  reason          String
+  urgencyLevel    String                @default("NORMAL") @map("urgency_level") // NORMAL, HIGH, URGENT
+  
+  // Payment information
+  paymentProof    String?               @map("payment_proof")
+  paymentMethod   String?               @map("payment_method")
+  paymentDetails  Json?                 @map("payment_details")
+  bankTransferDetails Json?             @map("bank_transfer_details") // Bank account, reference number, etc.
+  
+  // Status and processing
+  status          CoinTransactionStatus @default(PENDING)
+  adminNotes      String?               @map("admin_notes")
+  rejectionReason String?               @map("rejection_reason")
+  
+  // Customer communication
+  customerNotes   String?               @map("customer_notes") // Customer's additional notes
+  contactPreference String?             @map("contact_preference") // PHONE, EMAIL, WHATSAPP
+  
+  // Workflow
+  reviewedAt      DateTime?             @map("reviewed_at") // When admin first reviewed
+  approvedAt      DateTime?             @map("approved_at") // When approved by admin
+  
+  // Timestamps
+  requestedAt     DateTime              @default(now()) @map("requested_at")
+  processedAt     DateTime?             @map("processed_at")
+  expiresAt       DateTime?             @map("expires_at")
+  
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  coinTransactions CoinTransaction[]
+  
+  @@index([customerId, status])
+  @@index([processedById, status])
+  @@index([status, requestedAt])
+  @@index([urgencyLevel, status])
+  @@index([requestNumber])
+  @@map("coin_top_up_requests")
+}
+
+// New model for tracking daily/monthly spending limits
+model CoinSpendingLimit {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String   @map("user_id") @db.VarChar
+  
+  // Limits
+  dailyLimit      BigInt   @map("daily_limit")
+  monthlyLimit    BigInt   @map("monthly_limit")
+  
+  // Current usage (reset daily/monthly)
+  dailySpent      BigInt   @default(0) @map("daily_spent")
+  monthlySpent    BigInt   @default(0) @map("monthly_spent")
+  
+  // Reset tracking
+  lastDailyReset  DateTime @default(now()) @map("last_daily_reset")
+  lastMonthlyReset DateTime @default(now()) @map("last_monthly_reset")
+  
+  // Status
+  isActive        Boolean  @default(true) @map("is_active")
+  
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  
+  @@unique([userId])
+  @@index([userId, isActive])
+  @@map("coin_spending_limits")
 }
 
 model Fleet {
@@ -250,6 +455,12 @@ model PricingRule {
   minimumFare     BigInt      @map("minimum_fare")
   surgeMultiplier Float       @default(1.0) @map("surge_multiplier") @db.Real
   
+  // Coin pricing (optional, for coin-based payments)
+  baseFareCoins   BigInt?     @map("base_fare_coins") // Base fare in coins
+  perKmRateCoins  BigInt?     @map("per_km_rate_coins") // Per km rate in coins
+  perMinuteRateCoins BigInt?  @map("per_minute_rate_coins") // Per minute rate in coins
+  minimumFareCoins BigInt?    @map("minimum_fare_coins") // Minimum fare in coins
+  
   // Time-based pricing
   isActive        Boolean     @default(true) @map("is_active")
   validFrom       DateTime    @map("valid_from")
@@ -269,25 +480,25 @@ model PricingRule {
 model Order {
   id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
 
-  // Relations
-  fleet            Fleet               @relation(fields: [fleetId], references: [id])
-  fleetId          String              @map("fleet_id") @db.VarChar
-  driver           User                @relation("DriverOrders", fields: [driverId], references: [id])
-  driverId         String              @map("driver_id") @db.VarChar
+  // Relations (existing)
+  fleet            Fleet?               @relation(fields: [fleetId], references: [id])
+  fleetId          String?              @map("fleet_id") @db.VarChar
+  driver           User?                @relation("DriverOrders", fields: [driverId], references: [id])
+  driverId         String?              @map("driver_id") @db.VarChar
   customer         User?               @relation("CustomerOrders", fields: [customerId], references: [id])
   customerId       String?             @map("customer_id") @db.VarChar
 
-  // Order metadata
-  orderNumber      String              @unique @map("order_number") // Human-readable order ID
+  // Order metadata (existing)
+  orderNumber      String              @unique @map("order_number")
   tripType         TripType            @default(INSTANT) @map("trip_type")
   scheduledAt      DateTime?           @map("scheduled_at")
   
-  // Passenger details
+  // Passenger details (existing)
   passengerName    String              @map("passenger_name")
   passengerPhone   String              @map("passenger_phone")
   specialRequests  String?             @map("special_requests")
   
-  // Route information
+  // Route information (existing)
   pickupAddress    String              @map("pickup_address")
   pickupLat        Float               @map("pickup_lat") @db.Real
   pickupLng        Float               @map("pickup_lng") @db.Real
@@ -295,13 +506,13 @@ model Order {
   dropoffLat       Float               @map("dropoff_lat") @db.Real
   dropoffLng       Float               @map("dropoff_lng") @db.Real
   
-  // Trip details
+  // Trip details (existing)
   requestedVehicleType VehicleType     @map("requested_vehicle_type")
   distanceMeters   Int?                @map("distance_meters")
   estimatedDurationMinutes Int?        @map("estimated_duration_minutes")
   actualDurationMinutes Int?           @map("actual_duration_minutes")
 
-  // Fare calculation
+  // Fare calculation (existing)
   baseFare         BigInt              @map("base_fare")
   distanceFare     BigInt              @default(0) @map("distance_fare")
   timeFare         BigInt              @default(0) @map("time_fare")
@@ -311,40 +522,61 @@ model Order {
   discount         BigInt              @default(0) @map("discount")
   totalFare        BigInt              @map("total_fare")
   
-  // Payment
+  // Enhanced operational fee tracking
+  operationalFeeCoins BigInt?          @default(0) @map("operational_fee_coins") // Operational fee charged in coins
+  operationalFeePercent Float?         @map("operational_fee_percent") // Percentage used for calculation
+  operationalFeeConfig Json?           @map("operational_fee_config") // Snapshot of config used
+  operationalFeeStatus String?         @default("PENDING") @map("operational_fee_status") // PENDING, CHARGED, FAILED, WAIVED
+  operationalFeeChargedAt DateTime?    @map("operational_fee_charged_at")
+  operationalFeeTransactionId String? @map("operational_fee_transaction_id") // Reference to coin transaction
+  
+  // Coin-based fare (existing but enhanced)
+  baseFareCoins    BigInt?             @map("base_fare_coins")
+  distanceFareCoins BigInt?            @default(0) @map("distance_fare_coins")
+  timeFareCoins    BigInt?             @default(0) @map("time_fare_coins")
+  airportFareCoins BigInt?             @default(0) @map("airport_fare_coins")
+  surgeFareCoins   BigInt?             @default(0) @map("surge_fare_coins")
+  additionalFareCoins BigInt?          @default(0) @map("additional_fare_coins")
+  discountCoins    BigInt?             @default(0) @map("discount_coins")
+  totalFareCoins   BigInt?             @map("total_fare_coins")
+  
+  // Payment (existing)
   paymentMethod    PaymentMethod       @map("payment_method")
   paymentStatus    PaymentStatus       @default(PENDING) @map("payment_status")
 
-  // Status & timing
+  // Status & timing (existing)
   status           OrderStatus         @default(PENDING)
   
-  // Driver assignment
   driverAssignedAt DateTime?           @map("driver_assigned_at")
   driverAcceptedAt DateTime?           @map("driver_accepted_at")
   driverArrivedAt  DateTime?           @map("driver_arrived_at")
   tripStartedAt    DateTime?           @map("trip_started_at")
   tripCompletedAt  DateTime?           @map("trip_completed_at")
   
-  // Cancellation
+  // Cancellation (existing)
   cancelledAt      DateTime?           @map("cancelled_at")
   cancelledReason  String?             @map("cancelled_reason")
   cancellationFee  BigInt              @default(0) @map("cancellation_fee")
+  cancellationFeeCoins BigInt?         @default(0) @map("cancellation_fee_coins")
   
-  // System fields
+  // System fields (existing)
   idempotencyKey   String?             @unique @map("idempotency_key")
   createdAt        DateTime            @default(now()) @map("created_at")
   updatedAt        DateTime            @updatedAt @map("updated_at")
 
-  // Relations
+  // Relations (existing)
   statusHistory    OrderStatusHistory[]
   payment          Payment?
   rating           Rating?
+  coinTransactions CoinTransaction[]
 
   @@index([customerId, status, createdAt])
   @@index([driverId, status, createdAt])
   @@index([status, scheduledAt])
   @@index([orderNumber])
-  @@index([pickupLat, pickupLng]) // Geospatial queries
+  @@index([pickupLat, pickupLng])
+  @@index([paymentMethod, paymentStatus])
+  @@index([operationalFeeStatus]) // New index for operational fee queries
   @@map("orders")
 }
 
@@ -432,7 +664,7 @@ model Payment {
   
   // Payment details
   paymentMethod   PaymentMethod @map("payment_method")
-  provider        String        // MIDTRANS, XENDIT, MANUAL, etc.
+  provider        String        // MIDTRANS, XENDIT, MANUAL, COINS, etc.
   providerId      String?       @map("provider_id")
   providerOrderId String?       @map("provider_order_id")
   
@@ -440,6 +672,10 @@ model Payment {
   amount          BigInt
   platformFee     BigInt        @default(0) @map("platform_fee")
   driverEarning   BigInt        @default(0) @map("driver_earning")
+  
+  // Coin payment specific
+  coinAmount      BigInt?       @map("coin_amount") // Amount in coins if paid with coins
+  coinTransactionId String?     @map("coin_transaction_id") // Reference to coin transaction
   
   // Status
   status          PaymentStatus @default(PENDING)
@@ -456,6 +692,7 @@ model Payment {
   
   @@index([status, createdAt])
   @@index([provider, providerId])
+  @@index([paymentMethod])
   @@map("payments")
 }
 
@@ -514,8 +751,8 @@ model DriverStatusHistory {
 
 model AuditLog {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  action     String   // CREATE, UPDATE, DELETE, LOGIN, etc.
-  resource   String   // users, orders, fleets, etc.
+  action     String   // CREATE, UPDATE, DELETE, LOGIN, COIN_TOP_UP, COIN_DEDUCTION, etc.
+  resource   String   // users, orders, fleets, coin_wallets, coin_transactions, etc.
   resourceId String?  @map("resource_id")
   oldValues  Json?    @map("old_values")
   newValues  Json?    @map("new_values")
@@ -546,4 +783,43 @@ model AppConfig {
   @@index([key])
   @@index([isPublic])
   @@map("app_configs")
+}
+
+model OperationalFeeConfig {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  name                  String   // Configuration name like "Standard Fee", "Premium Fee"
+  
+  // Fee structure
+  percentageOfBaseFare  Float    @default(0.10) @map("percentage_of_base_fare") // 10% default
+  minimumFeeCoins       BigInt?  @map("minimum_fee_coins") // Minimum fee in coins
+  maximumFeeCoins       BigInt?  @map("maximum_fee_coins") // Maximum fee in coins
+  flatFeeCoins          BigInt?  @map("flat_fee_coins") // Optional flat fee
+  
+  // Applicability
+  vehicleTypes          VehicleType[] @map("vehicle_types") // Which vehicle types this applies to
+  userRoles             Role[]    // Which user roles this applies to
+  
+  // Conditions
+  isActive              Boolean  @default(true) @map("is_active")
+  validFrom             DateTime @default(now()) @map("valid_from")
+  validTo               DateTime? @map("valid_to")
+  
+  // Geofencing (optional)
+  applicableAreas       Json?    @map("applicable_areas") // GeoJSON polygons
+  
+  // Order conditions
+  minimumOrderValue     BigInt?  @map("minimum_order_value") // Minimum order value to apply fee
+  maximumOrderValue     BigInt?  @map("maximum_order_value") // Maximum order value to apply fee
+  
+  // Metadata
+  description           String?
+  metadata              Json?    // Additional configuration
+  
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  createdBy             String?  @map("created_by") // Admin who created this config
+  
+  @@index([isActive, validFrom, validTo])
+  @@index([vehicleTypes])
+  @@map("operational_fee_configs")
 }
