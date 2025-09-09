@@ -1392,7 +1392,7 @@ Semoga perjalanan lancar!
                   ) : (
                     <>
                       <Send className="h-4 w-4 mr-1" />
-                      Template
+                      WhatsApp
                     </>
                   )}
                 </Button>
@@ -1402,7 +1402,7 @@ Semoga perjalanan lancar!
             {/* Step 2: Send to Customer SECOND */}
             <div className="flex items-center justify-between p-3 border rounded-lg">
               <div className="flex-1">
-                <p className="font-medium text-sm">{lastOrderData?.driver ? '2' : '1'}. Hubungi Customer</p>
+                <p className="font-medium text-sm">{lastOrderData?.driver ? '2' : '1'}. Kirim ke Penumpang</p>
                 <p className="text-xs text-gray-500">Buka WhatsApp tanpa template pesan</p>
               </div>
               <Button
