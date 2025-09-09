@@ -13,6 +13,8 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { CoinTransactionType, CoinTransactionStatus, Prisma, CoinTransaction } from '@prisma/client';
 import { ManualCoinAdjustmentDto } from './dto/manual-coin-adjustment.dto';
 
+const RUPIAH_TO_COINS_RATE = 1;
+
 export interface OperationalFeeResult {
   success: boolean;
   transactionId?: string;
@@ -111,15 +113,18 @@ export class CoinService {
   async deductOperationalFee(
     userId: string, 
     orderId: string, 
+    baseFareAmount: bigint,
     distanceFareAmount: bigint,
-    baseFareAmount: bigint
+    distanceMeters: number
   ): Promise<OperationalFeeResult> {
-    const feeConfig = await this.getOperationalFeeConfig();
-    const feeAmount = this.calculateOperationalFee(distanceFareAmount, baseFareAmount, feeConfig.percentageOfBaseFare);
+    const feeConfig = await this.getOperationalFeeConfig(distanceMeters);
+    const feeAmount = this.calculateOperationalFee(distanceFareAmount, baseFareAmount, distanceMeters);
   
     this.logger.log(`Calculating operational fee for order ${orderId}`, {
       userId,
+      baseFareAmount: baseFareAmount.toString(),
       distanceFareAmount: distanceFareAmount.toString(),
+      distanceMeters,
       feePercentage: feeConfig.percentageOfBaseFare,
       calculatedFee: feeAmount.toString(),
     });
@@ -169,15 +174,21 @@ export class CoinService {
             type: CoinTransactionType.OPERATIONAL_FEE,
             status: CoinTransactionStatus.COMPLETED,
             amount: -feeAmount, // Negative for deduction
-            description: `Operational fee for order ${orderId}`,
+            description: `Operational fee for order ${orderId} (${distanceMeters}m, ${feeConfig.percentageOfBaseFare * 100}%)`,
             balanceBefore: wallet.balance,
             balanceAfter: newBalance,
             referenceType: 'order',
             referenceId: orderId,
             orderId,
-            distanceFareAmount, // FIXED: Use actual baseFareAmount
+            // baseFareAmount, // Store base fare
+            distanceFareAmount, // Store distance fare
             feePercentage: feeConfig.percentageOfBaseFare,
-            operationalFeeConfig: feeConfig.percentageOfBaseFare,
+            operationalFeeConfig: {
+              percentage: feeConfig.percentageOfBaseFare,
+              distanceMeters,
+              feeRule: distanceMeters >= 1000 && distanceMeters <= 6000 ? '7.5% (1-6km)' : 
+                       distanceMeters > 6000 ? '11% (>6km)' : '5% (<1km)'
+            },
             processedAt: new Date(),
             idempotencyKey: `operational-fee-${orderId}`,
           },
@@ -192,7 +203,15 @@ export class CoinService {
             operationalFeeStatus: 'CHARGED',
             operationalFeeChargedAt: new Date(),
             operationalFeeTransactionId: transaction.id,
-            operationalFeeConfig: feeConfig.percentageOfBaseFare,
+            operationalFeeConfig: {
+              percentage: feeConfig.percentageOfBaseFare,
+              distanceMeters,
+              baseFareAmount: baseFareAmount.toString(),
+              distanceFareAmount: distanceFareAmount.toString(),
+              totalFareUsed: (baseFareAmount + distanceFareAmount).toString(),
+              feeRule: distanceMeters >= 1000 && distanceMeters <= 6000 ? '7.5% (1-6km)' : 
+                       distanceMeters > 6000 ? '11% (>6km)' : '5% (<1km)'
+            },
           },
         });
   
@@ -207,6 +226,8 @@ export class CoinService {
       this.logger.log(`Operational fee deducted successfully`, {
         userId,
         orderId,
+        distanceMeters,
+        feePercentage: feeConfig.percentageOfBaseFare,
         feeAmount: feeAmount.toString(),
         newBalance: result.newBalance.toString(),
         transactionId: result.transaction.id,
@@ -217,13 +238,14 @@ export class CoinService {
         transactionId: result.transaction.id,
         feeAmount: feeAmount.toString(),
         newBalance: result.newBalance.toString(),
-        message: 'Operational fee deducted successfully',
+        message: `Operational fee deducted successfully (${feeConfig.percentageOfBaseFare * 100}% for ${distanceMeters}m)`,
       };
   
     } catch (error) {
       this.logger.error(`Failed to deduct operational fee`, {
         userId,
         orderId,
+        distanceMeters,
         error: error.message,
         stack: error.stack,
       });
@@ -238,17 +260,79 @@ export class CoinService {
     }
   }
 
-  private calculateOperationalFee(baseFareAmount: bigint, distanceFareAmount: bigint, feePercentage: number): bigint {
-    const feeAmount = ((distanceFareAmount + baseFareAmount) * BigInt(Math.round(feePercentage * 100))) / BigInt(10000);
+  private convertRupiahToCoins(rupiahAmount: bigint): bigint {
+    // Opsi 1: 1 rupiah = 1 coin
+    return rupiahAmount;
+    
+    // Opsi 2: 1 rupiah = 0.1 coin (uncomment jika digunakan)
+    // return rupiahAmount / BigInt(10);
+    
+    // Opsi 3: 1 rupiah = 0.01 coin (uncomment jika digunakan)
+    // return rupiahAmount / BigInt(100);
+    
+    // Opsi 4: Custom rate (uncomment jika digunakan)
+    // const rate = BigInt(Math.round(RUPIAH_TO_COINS_RATE * 10000));
+    // return (rupiahAmount * rate) / BigInt(10000);
+  }
+
+  private calculateOperationalFee(
+    distanceFareAmount: bigint, 
+    baseFareAmount: bigint, 
+    distanceMeters: number
+  ): bigint {
+    // Tentukan fee percentage berdasarkan distanceMeters
+    let feePercentage: number;
+    
+    if (distanceMeters >= 1000 && distanceMeters <= 6000) {
+      feePercentage = 0.075; // 7.5%
+    } else if (distanceMeters > 6000) {
+      feePercentage = 0.11; // 11%
+    } else {
+      feePercentage = 0.05; // 5% untuk jarak dekat
+    }
+  
+    // FIXED: Konversi fare dari rupiah ke coins terlebih dahulu
+    const baseFareInCoins = this.convertRupiahToCoins(baseFareAmount);
+    const distanceFareInCoins = this.convertRupiahToCoins(distanceFareAmount);
+    const totalFareInCoins = baseFareInCoins + distanceFareInCoins;
+    
+    // Hitung fee dalam coins
+    const feeAmount = (totalFareInCoins * BigInt(Math.round(feePercentage * 100))) / BigInt(10000);
+    
+    this.logger.log(`🧮 Fee calculation detail`, {
+      baseFareRupiah: baseFareAmount.toString(),
+      distanceFareRupiah: distanceFareAmount.toString(),
+      baseFareCoins: baseFareInCoins.toString(),
+      distanceFareCoins: distanceFareInCoins.toString(),
+      totalFareCoins: totalFareInCoins.toString(),
+      feePercentage,
+      feeAmountCoins: feeAmount.toString(),
+      conversionRate: RUPIAH_TO_COINS_RATE,
+    });
+    
     return feeAmount;
   }
 
-  private async getOperationalFeeConfig() {
-    // For now, return default config. Later can be fetched from database
+  private async getOperationalFeeConfig(distanceMeters?: number) {
+    let percentageOfBaseFare: number;
+    
+    if (distanceMeters) {
+      if (distanceMeters >= 1000 && distanceMeters <= 6000) {
+        percentageOfBaseFare = 0.075; // 7.5%
+      } else if (distanceMeters > 6000) {
+        percentageOfBaseFare = 0.11; // 11%
+      } else {
+        percentageOfBaseFare = 0.05; // 5% untuk jarak dekat
+      }
+    } else {
+      percentageOfBaseFare = 0.10; // Default 10%
+    }
+  
     return {
-      percentageOfBaseFare: 0.10, // 10%
+      percentageOfBaseFare,
       minimumFeeCoins: BigInt(1000), // 1,000 coins minimum
       maximumFeeCoins: BigInt(100000), // 100,000 coins maximum
+      distanceMeters,
     };
   }
 

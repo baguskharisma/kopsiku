@@ -77,7 +77,6 @@ function buildFarePayload(
   const actualAirportFare = fareResult.airportFare;
   const actualTotalFare = fareResult.totalFare;
 
-  // Convert to cents
   const baseCents = Math.round(actualBaseFare * 100);
   const distanceCents = Math.round(actualDistanceFare * 100);
   const airportCents = Math.round(actualAirportFare * 100);
@@ -85,7 +84,6 @@ function buildFarePayload(
 
   // Apply vehicle type multiplier
   const finalFareCurrency = calculateVehicleFare(actualTotalFare, selectedVehicleType);
-  const finalFareCents = Math.round(finalFareCurrency * 100);
 
   return {
     baseCents,
@@ -93,9 +91,14 @@ function buildFarePayload(
     airportCents,
     totalCents,
     finalFareCurrency,
-    finalFareCents,
     farePerKm: fareResult.farePerKm,
     additionalKm: fareResult.additionalKm,
+    
+    // // ✅ Keep cents for backward compatibility tapi dengan nama yang jelas
+    // baseCents: baseRupiah, // Actually rupiah, not cents
+    // distanceCents: distanceRupiah, // Actually rupiah, not cents
+    // airportCents: airportRupiah, // Actually rupiah, not cents
+    // totalCents: totalRupiah, // Actually rupiah, not cents
   };
 }
 
@@ -834,10 +837,10 @@ Semoga perjalanan lancar!
         requestedVehicleType: selectedVehicleType,
         distanceMeters: Math.round(distanceKm * 1000),
         estimatedDurationMinutes: Math.round(computeDurationEstimate(routeData, fareEstimate)),
-        baseFare: Math.round(farePayload.baseCents),
-        distanceFare: Math.round(farePayload.distanceCents),
+        baseFare: Math.round(farePayload.baseCents),      // Tidak dibagi 100
+        distanceFare: Math.round(farePayload.distanceCents), // Tidak dibagi 100
         airportFare: farePayload.airportCents > 0 ? Math.round(farePayload.airportCents) : undefined,
-        totalFare: Math.round(farePayload.totalCents),
+        totalFare: Math.round(farePayload.totalCents),    // Tidak dibagi 100
         paymentMethod: "CASH" as const,
         specialRequests: selectedDriverId ? 
           `Preferred driver: ${selectedDriver?.name} (${selectedDriver?.plate})`.substring(0, 1000) : 
@@ -1426,7 +1429,7 @@ Semoga perjalanan lancar!
             </div>
 
             {/* Download Receipt Option */}
-            <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+            {/* <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
               <div className="flex-1">
                 <p className="font-medium text-sm">Download Receipt</p>
                 <p className="text-xs text-gray-500">Simpan bukti pesanan</p>
@@ -1439,7 +1442,7 @@ Semoga perjalanan lancar!
                 <Download className="h-4 w-4 mr-1" />
                 Download
               </Button>
-            </div>
+            </div> */}
           </div>
 
           <AlertDialogFooter>

@@ -474,10 +474,11 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
     this.validateFareCalculation(createOrderDto);
     const orderNumber = await this.generateOrderNumber();
   
-    // Debug logging
     this.logger.log(`🔍 Order creation started`, {
       adminId: createOrderDto.adminId,
       baseFare: createOrderDto.baseFare,
+      distanceFare: createOrderDto.distanceFare,
+      distanceMeters: createOrderDto.distanceMeters,
       orderNumber,
     });
   
@@ -502,22 +503,28 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
         const walletBalance = await this.coinService.getWalletBalance(createOrderDto.adminId);
         customerHasWallet = true;
         
-        // Calculate required fee
-        const requiredFeeAmount = this.calculateOperationalFeeAmount(BigInt(sanitizedData.distanceFare));
+        // Calculate required fee berdasarkan distanceMeters
+        const requiredFeeAmount = this.calculateOperationalFeeAmount(
+          BigInt(sanitizedData.baseFare),
+          BigInt(sanitizedData.distanceFare), 
+          sanitizedData.distanceMeters
+        );
         
         this.logger.log(`💰 Wallet validation`, {
           customerId: createOrderDto.adminId,
           currentBalance: walletBalance,
           baseFare: sanitizedData.baseFare,
           distanceFare: sanitizedData.distanceFare,
+          distanceMeters: sanitizedData.distanceMeters,
           requiredFee: requiredFeeAmount.toString(),
-          feeCalculationBasis: 'distanceFare', // Added for clarity
+          feeRule: this.getFeeRuleDescription(sanitizedData.distanceMeters),
           hasEnoughBalance: BigInt(walletBalance) >= requiredFeeAmount,
         });
         
         if (BigInt(walletBalance) < requiredFeeAmount) {
+          const feeRule = this.getFeeRuleDescription(sanitizedData.distanceMeters);
           throw new BadRequestException(
-            `Insufficient coin balance. Required: ${requiredFeeAmount.toString()} coins, Available: ${walletBalance}`
+            `Insufficient coin balance. Required: ${requiredFeeAmount.toString()} coins (${feeRule}), Available: ${walletBalance} coins`
           );
         }
       } catch (error) {
@@ -535,7 +542,7 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
   
     try {
       // Create order first
-      this.logger.log(`🔄 Creating order in database...`);
+      this.logger.log(`📄 Creating order in database...`);
       const order = await this.prisma.order.create({
         data: {
           orderNumber,
@@ -575,6 +582,7 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
       this.logger.log(`✅ Order created in database`, {
         orderId: order.id,
         orderNumber: order.orderNumber,
+        distanceMeters: order.distanceMeters,
         operationalFeeStatus: order.operationalFeeStatus,
       });
   
@@ -585,27 +593,31 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
         this.logger.log(`💳 Starting operational fee deduction...`);
         
         try {
-          // CRITICAL: Make sure this method exists and is not commented out
+          // UPDATED: Pass distanceMeters to deductOperationalFee
           operationalFeeResult = await this.coinService.deductOperationalFee(
             createOrderDto.adminId,
             order.id,
-            order.baseFare,
-            BigInt(sanitizedData.distanceFare)
+            BigInt(order.baseFare),
+            BigInt(order.distanceFare),
+            order.distanceMeters as number // Ensure distanceMeters is a number
           );
           
           this.logger.log(`✅ Operational fee processed successfully`, {
             orderId: order.id,
             customerId: createOrderDto.adminId,
+            distanceMeters: order.distanceMeters,
             feeAmount: operationalFeeResult.feeAmount,
             newBalance: operationalFeeResult.newBalance,
             transactionId: operationalFeeResult.transactionId,
             success: operationalFeeResult.success,
+            feeRule: this.getFeeRuleDescription(order.distanceMeters as number),
           });
           
         } catch (feeError) {
           this.logger.error(`❌ Operational fee processing failed`, {
             orderId: order.id,
             customerId: createOrderDto.adminId,
+            distanceMeters: order.distanceMeters,
             error: (feeError as Error).message,
             stack: (feeError as Error).stack,
           });
@@ -618,12 +630,11 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
               operationalFeeConfig: { 
                 error: (feeError as Error).message,
                 failedAt: new Date().toISOString(),
+                distanceMeters: order.distanceMeters,
               },
             },
           });
           
-          // IMPORTANT: Decide whether to fail entire order or continue
-          // For debugging, let's continue but log the error
           this.logger.warn(`⚠️ Order created but operational fee failed - continuing anyway`);
         }
       } else {
@@ -642,22 +653,26 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
           amount: operationalFeeResult.feeAmount,
           transactionId: operationalFeeResult.transactionId || '',
           remainingBalance: operationalFeeResult.newBalance,
+          feeRule: this.getFeeRuleDescription(order.distanceMeters as number),
+          distanceMeters: order.distanceMeters as number,
         };
       }
-  
       // Emit events
       this.ordersGateway.emitOrderCreated(transformedResult);
       
       this.logger.log(`🎉 Order creation completed`, {
         orderId: order.id,
         orderNumber: order.orderNumber,
+        distanceMeters: order.distanceMeters,
         totalFare: order.totalFare.toString(),
         operationalFeeCharged: operationalFeeResult?.success || false,
-        operationalFeeAmount: operationalFeeResult?.feeAmount || 'N/A',
+        operationalFeeAmount: operationalFeeResult?.feeAmount ?? 'N/A',
+        feeRule: order.distanceMeters !== null && order.distanceMeters !== undefined
+          ? this.getFeeRuleDescription(order.distanceMeters)
+          : 'N/A',
       });
-  
+
       return transformedResult;
-      
     } catch (error) {
       this.logger.error(`💥 Order creation failed`, {
         error: (error as Error).message,
@@ -665,6 +680,7 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
         orderNumber,
         passengerName: sanitizedData.passengerName,
         adminId: createOrderDto.adminId,
+        distanceMeters: sanitizedData.distanceMeters,
       });
       throw error;
     }
@@ -955,10 +971,75 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
   //   };
   // }
 
-  private calculateOperationalFeeAmount(baseFareAmount: bigint): bigint {
-    const feePercentage = 0.10; // 10%
-    return (baseFareAmount * BigInt(Math.round(feePercentage * 100))) / BigInt(10000);
+  private convertRupiahToCoins(rupiahAmount: bigint): bigint {
+    // PENTING: Gunakan logic yang sama dengan CoinsService
+    // Opsi 1: 1 rupiah = 1 coin
+    return rupiahAmount;
+    
+    // Opsi 2: 1 rupiah = 0.1 coin  
+    // return rupiahAmount / BigInt(10);
+    
+    // Opsi 3: 1 rupiah = 0.01 coin
+    // return rupiahAmount / BigInt(100);
   }
+  
+
+  private calculateOperationalFeeAmount(
+    baseFareAmount: bigint, 
+    distanceFareAmount: bigint, 
+    distanceMeters: number
+  ): bigint {
+    let feePercentage: number;
+    
+    if (distanceMeters >= 1000 && distanceMeters <= 6000) {
+      feePercentage = 0.075; // 7.5%
+    } else if (distanceMeters > 6000) {
+      feePercentage = 0.11; // 11%
+    } else {
+      feePercentage = 0.05; // 5%
+    }
+  
+    // FIXED: Konversi dari rupiah ke coins
+    const baseFareInCoins = this.convertRupiahToCoins(baseFareAmount);
+    const distanceFareInCoins = this.convertRupiahToCoins(distanceFareAmount);
+    const totalFareInCoins = baseFareInCoins + distanceFareInCoins;
+    
+    const feeAmount = (totalFareInCoins * BigInt(Math.round(feePercentage * 10000))) / BigInt(10000);
+    
+    this.logger.log(`💰 Fee calculation preview`, {
+      baseFareRupiah: baseFareAmount.toString(),
+      distanceFareRupiah: distanceFareAmount.toString(),
+      baseFareCoins: baseFareInCoins.toString(),
+      distanceFareCoins: distanceFareInCoins.toString(),
+      totalFareCoins: totalFareInCoins.toString(),
+      feePercentage,
+      distanceMeters,
+      feeAmountCoins: feeAmount.toString(),
+      feeRule: this.getFeeRuleDescription(distanceMeters),
+    });
+    
+    return feeAmount;
+  }
+  private getFeeRuleDescription(distanceMeters: number): string {
+    if (distanceMeters >= 1000 && distanceMeters <= 6000) {
+      return '7.5% fee (1-6km)';
+    } else if (distanceMeters > 6000) {
+      return '11% fee (>6km)';
+    } else {
+      return '5% fee (<1km)';
+    }
+  }
+
+  private getFeePercentage(distanceMeters: number): number {
+    if (distanceMeters >= 1000 && distanceMeters <= 6000) {
+      return 0.075; // 7.5%
+    } else if (distanceMeters > 6000) {
+      return 0.11; // 11%
+    } else {
+      return 0.05; // 5%
+    }
+  }
+  
    // Helper method to transform BigInt fields to strings
    private transformOrderResponse(order: any) {
     return {
