@@ -22,7 +22,7 @@ interface GoogleMapsClientProps {
 // Declare global google variable
 declare global {
   interface Window {
-    google: typeof google;
+    google: typeof google.maps;
     initGoogleMaps: () => void;
   }
 }
