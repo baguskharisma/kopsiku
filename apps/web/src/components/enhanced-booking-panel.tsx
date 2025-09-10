@@ -1257,7 +1257,7 @@ Semoga perjalanan lancar!
                 <MessageCircle className="h-5 w-5 mr-2 text-green-600" />
                 Konfirmasi Pesanan
               </AlertDialogTitle>
-              <Button
+              {/* <Button
                 variant="outline"
                 size="sm"
                 onClick={handleDownloadReceipt}
@@ -1265,7 +1265,7 @@ Semoga perjalanan lancar!
               >
                 <Download className="h-4 w-4 mr-1" />
                 Download
-              </Button>
+              </Button> */}
             </div>
             <AlertDialogDescription className="text-left space-y-3">
               {/* Header with Date and Time */}
@@ -1372,6 +1372,21 @@ Semoga perjalanan lancar!
           </AlertDialogHeader>
           
           <div className="space-y-3 py-4">
+          {/* Download Receipt Option */}
+            <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+              <div className="flex-1">
+                <p className="font-medium text-sm">Download Receipt</p>
+                <p className="text-xs text-gray-500">Simpan bukti pesanan</p>
+              </div>
+              <Button
+                onClick={handleDownloadReceipt}
+                size="sm"
+                variant="outline"
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Download
+              </Button>
+            </div>
             {/* Step 1: Send to Driver FIRST (if available) */}
             {lastOrderData?.driver && (
               <div className="flex items-center justify-between p-3 border rounded-lg">
@@ -1427,22 +1442,6 @@ Semoga perjalanan lancar!
                 )}
               </Button>
             </div>
-
-            {/* Download Receipt Option */}
-            {/* <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
-              <div className="flex-1">
-                <p className="font-medium text-sm">Download Receipt</p>
-                <p className="text-xs text-gray-500">Simpan bukti pesanan</p>
-              </div>
-              <Button
-                onClick={handleDownloadReceipt}
-                size="sm"
-                variant="outline"
-              >
-                <Download className="h-4 w-4 mr-1" />
-                Download
-              </Button>
-            </div> */}
           </div>
 
           <AlertDialogFooter>
