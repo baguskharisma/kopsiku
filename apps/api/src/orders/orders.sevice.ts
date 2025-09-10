@@ -970,17 +970,14 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
   //     message: 'Operational fee processed successfully',
   //   };
   // }
-
+  
   private convertRupiahToCoins(rupiahAmount: bigint): bigint {
     // PENTING: Gunakan logic yang sama dengan CoinsService
-    // Opsi 1: 1 rupiah = 1 coin
+    // 1 rupiah = 1 coin
     return rupiahAmount;
     
-    // Opsi 2: 1 rupiah = 0.1 coin  
-    // return rupiahAmount / BigInt(10);
-    
-    // Opsi 3: 1 rupiah = 0.01 coin
-    // return rupiahAmount / BigInt(100);
+    // Alternatif jika ingin rasio berbeda:
+    // return rupiahAmount / BigInt(10); // 1 rupiah = 0.1 coin
   }
   
 
@@ -999,27 +996,35 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
       feePercentage = 0.05; // 5%
     }
   
-    // FIXED: Konversi dari rupiah ke coins
-    const baseFareInCoins = this.convertRupiahToCoins(baseFareAmount);
-    const distanceFareInCoins = this.convertRupiahToCoins(distanceFareAmount);
-    const totalFareInCoins = baseFareInCoins + distanceFareInCoins;
+    // FIXED: Konversi dari cents ke rupiah, lalu ke coins
+    const baseFareInRupiah = baseFareAmount / BigInt(100);
+    const distanceFareInRupiah = distanceFareAmount / BigInt(100);
+    const totalFareInRupiah = baseFareInRupiah + distanceFareInRupiah;
     
+    // Convert to coins (1:1 ratio)
+    const totalFareInCoins = this.convertRupiahToCoins(totalFareInRupiah);
+    
+    // FIXED: Gunakan pembagi yang konsisten
     const feeAmount = (totalFareInCoins * BigInt(Math.round(feePercentage * 10000))) / BigInt(10000);
     
     this.logger.log(`💰 Fee calculation preview`, {
-      baseFareRupiah: baseFareAmount.toString(),
-      distanceFareRupiah: distanceFareAmount.toString(),
-      baseFareCoins: baseFareInCoins.toString(),
-      distanceFareCoins: distanceFareInCoins.toString(),
+      baseFareCents: baseFareAmount.toString(),
+      distanceFareCents: distanceFareAmount.toString(),
+      baseFareRupiah: baseFareInRupiah.toString(),
+      distanceFareRupiah: distanceFareInRupiah.toString(),
+      totalFareRupiah: totalFareInRupiah.toString(),
       totalFareCoins: totalFareInCoins.toString(),
       feePercentage,
       distanceMeters,
+      multiplier: Math.round(feePercentage * 10000),
       feeAmountCoins: feeAmount.toString(),
       feeRule: this.getFeeRuleDescription(distanceMeters),
     });
     
     return feeAmount;
   }
+  
+
   private getFeeRuleDescription(distanceMeters: number): string {
     if (distanceMeters >= 1000 && distanceMeters <= 6000) {
       return '7.5% fee (1-6km)';
