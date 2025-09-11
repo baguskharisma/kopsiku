@@ -1,23 +1,23 @@
-// apps/web/src/app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
 const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
 
-// Gunakan tipe yang disediakan oleh Next.js
-type Params = { id: string };
-
-// Handler Route untuk GET
+// Sesuai dengan dokumentasi Next.js terbaru untuk dynamic route segments
 export async function GET(
   request: NextRequest,
-  { params }: { params: Params }
+  context: {
+    params: {
+      id: string
+    }
+  }
 ) {
+  const orderId = context.params.id;
+  const backendUrl = DEFAULT_BACKEND;
+  const cookieStore = cookies();
+  const authCookie = (await cookieStore).get('access_token');
+  
   try {
-    const orderId = params.id;
-    const backendUrl = DEFAULT_BACKEND;
-    const cookieStore = cookies();
-    const authCookie = (await cookieStore).get('access_token');
-    
     console.log(`Fetching order details from backend: ${backendUrl}/orders/${orderId}`);
     
     const response = await fetch(`${backendUrl}/orders/${orderId}`, {
@@ -26,7 +26,7 @@ export async function GET(
         'Content-Type': 'application/json',
         ...(authCookie ? { Cookie: `access_token=${authCookie.value}` } : {}),
       },
-      cache: 'no-store' // Pastikan data selalu segar
+      cache: 'no-store'
     });
 
     if (!response.ok) {
@@ -37,11 +37,6 @@ export async function GET(
       } catch (e) {
         errorJson = { message: errorText };
       }
-      
-      console.error('Error response from backend:', {
-        status: response.status,
-        error: errorJson
-      });
       
       return NextResponse.json(
         { 
