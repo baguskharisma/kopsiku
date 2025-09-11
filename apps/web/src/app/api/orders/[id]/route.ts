@@ -1,17 +1,23 @@
+// apps/web/src/app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001';
+const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+interface RouteParams {
+  params: {
+    id: string;
+  };
+}
+
+export async function GET(request: NextRequest, context: RouteParams) {
   try {
-    const orderId = params.id;
+    const orderId = context.params.id;
     const backendUrl = DEFAULT_BACKEND;
     const cookieStore = cookies();
     const authCookie = (await cookieStore).get('access_token');
+    
+    console.log(`Fetching order details from backend: ${backendUrl}/orders/${orderId}`);
     
     const response = await fetch(`${backendUrl}/orders/${orderId}`, {
       method: 'GET',
@@ -29,6 +35,11 @@ export async function GET(
       } catch (e) {
         errorJson = { message: errorText };
       }
+      
+      console.error('Error response from backend:', {
+        status: response.status,
+        error: errorJson
+      });
       
       return NextResponse.json(
         { 
