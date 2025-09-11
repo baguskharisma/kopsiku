@@ -565,12 +565,12 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
           airportFare: BigInt(sanitizedData.airportFare || 0),
           totalFare: BigInt(sanitizedData.totalFare),
           paymentMethod: sanitizedData.paymentMethod,
-          status: OrderStatus.PENDING,
-          operationalFeeStatus: customerHasWallet ? 'PENDING' : 'NOT_APPLICABLE',
+          status: OrderStatus.COMPLETED,
+          operationalFeeStatus: customerHasWallet ? 'COMPLETED' : 'NOT_APPLICABLE',
           statusHistory: {
             create: {
-              fromStatus: OrderStatus.PENDING,
-              toStatus: OrderStatus.PENDING,
+              fromStatus: OrderStatus.COMPLETED,
+              toStatus: OrderStatus.COMPLETED,
               reason: 'Order created by operator',
               changedBy: createdBy || null,
             },

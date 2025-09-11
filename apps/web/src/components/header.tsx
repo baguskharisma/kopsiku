@@ -40,6 +40,9 @@ export function Header() {
             <Link href="/taxi" className="transition-colors hover:text-foreground/80 text-foreground/60">
               Taksi Online
             </Link>
+            <Link href="/orders" className="transition-colors hover:text-foreground/80 text-foreground/60">
+              Riwayat
+            </Link>
           </nav>
         </div>
         <Sheet open={isOpen} onOpenChange={setIsOpen}>

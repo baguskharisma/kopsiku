@@ -1,4 +1,4 @@
-import { LocationCategory, VehicleType, OrderStatus, PaymentMethod, PaymentStatus } from "@prisma/client";
+import { LocationCategory, VehicleType, OrderStatus, PaymentMethod, PaymentStatus, Role } from "@prisma/client";
 
 // Location types based on Prisma schema
 export interface Location {
@@ -51,6 +51,12 @@ export interface CreateOrderRequest {
   
   // Payment
   paymentMethod: PaymentMethod;
+}
+
+export interface RouteData {
+  coordinates: Coordinates[];
+  distance: number;
+  duration: number;
 }
 
 export interface Order {
@@ -168,4 +174,14 @@ export interface NominatimResult {
     postcode?: string;
     country?: string;
   };
+}
+
+export interface User {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  role: Role;
+  avatarUrl?: string | null;
+  isVerified: boolean;
 }

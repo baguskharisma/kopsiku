@@ -1,6 +1,6 @@
 import Link from "next/link"
 import Image from "next/image"
-import { Car, Ticket, Package, User, Phone, Home, LogIn, Coins } from "lucide-react"
+import { Car, Ticket, Package, User, Phone, Home, Coins, History } from "lucide-react"
 import { LogoutButton } from "./auth/logout-button"
 import { useAuth } from "@/lib/use-auth"
 import { Button } from "@/components/ui/button"
@@ -68,6 +68,14 @@ export function MobileNav() {
       >
         <Car className="h-5 w-5 me-3" />
         Taksi Online
+      </Link>
+
+      <Link
+        href="/orders"
+        className="flex items-center space-x-3 text-lg font-medium transition-colors hover:text-foreground/80"
+      >
+        <History className="h-5 w-5 me-3" />
+        Riwayat
       </Link>
 
       <div className="border-t pt-4 mt-4 pe-4">
