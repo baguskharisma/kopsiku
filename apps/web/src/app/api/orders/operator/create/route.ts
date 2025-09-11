@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  const backendUrl = process.env.BACKEND_URL || "http://localhost:3001";
-  const targetPath = "/api/v1/orders/operator/create";
+  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
+  const targetPath = "/orders/operator/create";
 
   try {
     // Read incoming body (assume JSON)

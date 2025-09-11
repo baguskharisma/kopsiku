@@ -1044,71 +1044,57 @@ async testDriverQuery() {
   /**
  * Validates order creation request for additional security
  */
-private async validateOrderCreationRequest(
-  createOrderDto: CreateOrderDto, 
-  user: { id: string; role: Role }
-): Promise<void> {
-  // Phone number format validation
-  const phoneRegex = /^(\+62|62|0)[0-9]{8,13}$/;
-  if (!phoneRegex.test(createOrderDto.passengerPhone.replace(/[\s\-]/g, ''))) {
-    throw new BadRequestException('Invalid phone number format');
-  }
-
-  // Validate coordinates are within Riau bounds
-  const { pickupCoordinates, dropoffCoordinates } = createOrderDto;
-  if (!this.isWithinSumateraBounds(pickupCoordinates) || 
-      !this.isWithinSumateraBounds(dropoffCoordinates)) {
-    throw new BadRequestException('Coordinates must be within Riau Province');
-  }
-
-  // Validate fare consistency
-  const expectedTotal = createOrderDto.baseFare + createOrderDto.distanceFare + (createOrderDto.airportFare || 0);
-  if (Math.abs(expectedTotal - createOrderDto.totalFare) > 10000) { // Allow 100 rupiah difference for rounding
-    throw new BadRequestException('Fare calculation inconsistency detected');
-  }
-
-  // Validate minimum fare (base fare should be at least 60,000 rupiah = 6,000,000 cents)
-  if (createOrderDto.totalFare < 6000000) { // 60,000 rupiah minimum
-    throw new BadRequestException('Total fare below minimum threshold');
-  }
-
-  // FIXED: More realistic fare validation for Indonesian taxi system
-  // Base fare: 60,000 IDR for first km + 6,000 IDR per additional km
-  const distanceKm = createOrderDto.distanceMeters / 1000;
+  private async validateOrderCreationRequest(
+    createOrderDto: CreateOrderDto, 
+    user: { id: string; role: Role }
+  ): Promise<void> {
+    // Phone number format validation
+    const phoneRegex = /^(\+62|62|0)[0-9]{8,13}$/;
+    if (!phoneRegex.test(createOrderDto.passengerPhone.replace(/[\s\-]/g, ''))) {
+      throw new BadRequestException('Invalid phone number format');
+    }
   
-  // Calculate expected fare range based on distance
-  // const expectedBaseFare = 6000000; // 60,000 rupiah in cents
-  // const expectedAdditionalFare = Math.max(0, distanceKm - 1) * 600000; // 6,000 rupiah per km in cents
-  // const expectedMinimumFare = expectedBaseFare + expectedAdditionalFare;
-  // const expectedMaximumFare = expectedMinimumFare * 100000; // Allow multiplier for vehicle types
+    // Validate coordinates are within Riau bounds
+    const { pickupCoordinates, dropoffCoordinates } = createOrderDto;
+    if (!this.isWithinSumateraBounds(pickupCoordinates) || 
+        !this.isWithinSumateraBounds(dropoffCoordinates)) {
+      throw new BadRequestException('Coordinates must be within Riau Province');
+    }
   
-  // if (createOrderDto.totalFare < expectedMinimumFare || 
-  //     createOrderDto.totalFare > expectedMaximumFare) {
-  //   this.logger.warn('Fare validation failed', {
-  //     distanceKm,
-  //     totalFare: createOrderDto.totalFare,
-  //     expectedMinimum: expectedMinimumFare,
-  //     expectedMaximum: expectedMaximumFare,
-  //     vehicleType: createOrderDto.requestedVehicleType
-  //   });
+    // Validate fare consistency - pastikan total fare tidak berbeda jauh dari komponen penyusunnya
+    const expectedTotal = createOrderDto.baseFare + createOrderDto.distanceFare + (createOrderDto.airportFare || 0);
+    if (Math.abs(expectedTotal - createOrderDto.totalFare) > 10000) { // Allow 100 rupiah difference for rounding
+      throw new BadRequestException('Fare calculation inconsistency detected');
+    }
+  
+    // Validate minimum fare (base fare should be at least 15,000 rupiah = 1,500,000 cents)
+    // Menurunkan threshold minimum untuk memberikan fleksibilitas lebih
+    if (createOrderDto.totalFare < 1500000) { // 15,000 rupiah minimum
+      throw new BadRequestException('Total fare below minimum threshold');
+    }
+  
+    // Validasi jarak dan durasi yang masuk akal
+    const distanceKm = createOrderDto.distanceMeters / 1000;
     
-  //   throw new BadRequestException(
-  //     `Total fare (${createOrderDto.totalFare} cents) is outside expected range ` +
-  //     `(${expectedMinimumFare} - ${expectedMaximumFare} cents) for ${distanceKm.toFixed(1)}km trip`
-  //   );
-  // }
-
-  // Validate distance is reasonable (0.1km - 100km)
-  if (distanceKm < 0.1 || distanceKm > 10000) {
-    throw new BadRequestException(`Trip distance (${distanceKm.toFixed(1)}km) is outside reasonable range`);
+    // Validate distance is reasonable (0.1km - 500km) - memperluas rentang
+    if (distanceKm < 0.1 || distanceKm > 500) {
+      throw new BadRequestException(`Trip distance (${distanceKm.toFixed(1)}km) is outside reasonable range`);
+    }
+  
+    // Validate duration is reasonable (1 minute - 300 minutes)
+    if (createOrderDto.estimatedDurationMinutes < 1 || createOrderDto.estimatedDurationMinutes > 300) {
+      throw new BadRequestException(`Estimated duration (${createOrderDto.estimatedDurationMinutes} minutes) is outside reasonable range`);
+    }
+    
+    // Log informasi validasi untuk debugging jika diperlukan
+    this.logger.log('Order validation passed', {
+      distanceKm,
+      totalFare: createOrderDto.totalFare,
+      baseFare: createOrderDto.baseFare,
+      distanceFare: createOrderDto.distanceFare,
+      vehicleType: createOrderDto.requestedVehicleType
+    });
   }
-
-  // Validate duration is reasonable (1 minute - 300 minutes)
-  if (createOrderDto.estimatedDurationMinutes < 1 || createOrderDto.estimatedDurationMinutes > 300) {
-    throw new BadRequestException(`Estimated duration (${createOrderDto.estimatedDurationMinutes} minutes) is outside reasonable range`);
-  }
-}
-
   /**
    * Check if coordinates are within Indonesia bounds
    */

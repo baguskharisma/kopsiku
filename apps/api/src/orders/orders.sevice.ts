@@ -1747,23 +1747,27 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
     
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-
-    const todayOrderCount = await this.prisma.order.count({
-      where: {
-        createdAt: {
-          gte: startOfDay,
-          lt: endOfDay,
-        },
-      },
+    // Tambahkan timestamp dengan presisi tinggi untuk memastikan keunikan
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    
+    // Format: TXK-YYYYMMDD-TIMESTAMP-RANDOM
+    const orderNumber = `TXK-${dateStr}-${timestamp}-${randomStr}`;
+    
+    // Double-check apakah nomor ini sudah ada di database
+    const existingOrder = await this.prisma.order.findUnique({
+      where: { orderNumber },
+      select: { id: true }
     });
-
-    const sequence = (todayOrderCount + 1).toString().padStart(3, '0');
-    return `TXK-${dateStr}-${sequence}`;
+    
+    // Jika sudah ada, buat nomor baru dengan menambahkan random lagi
+    if (existingOrder) {
+      const newRandomStr = Math.random().toString(36).substring(2, 8);
+      return `TXK-${dateStr}-${timestamp}-${randomStr}-${newRandomStr}`;
+    }
+    
+    return orderNumber;
   }
-
   private sanitizeString(input: string): string {
     if (!input) return input;
     return input.trim().replace(/[<>\"'&]/g, '');
