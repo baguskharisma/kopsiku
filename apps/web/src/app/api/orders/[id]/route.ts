@@ -4,15 +4,16 @@ import { cookies } from 'next/headers';
 
 const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
 
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
+// Gunakan tipe yang disediakan oleh Next.js
+type Params = { id: string };
 
-export async function GET(request: NextRequest, context: RouteParams) {
+// Handler Route untuk GET
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Params }
+) {
   try {
-    const orderId = context.params.id;
+    const orderId = params.id;
     const backendUrl = DEFAULT_BACKEND;
     const cookieStore = cookies();
     const authCookie = (await cookieStore).get('access_token');
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest, context: RouteParams) {
         'Content-Type': 'application/json',
         ...(authCookie ? { Cookie: `access_token=${authCookie.value}` } : {}),
       },
+      cache: 'no-store' // Pastikan data selalu segar
     });
 
     if (!response.ok) {
