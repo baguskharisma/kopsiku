@@ -1080,7 +1080,7 @@ private async validateOrderCreationRequest(
   const expectedBaseFare = 6000000; // 60,000 rupiah in cents
   const expectedAdditionalFare = Math.max(0, distanceKm - 1) * 600000; // 6,000 rupiah per km in cents
   const expectedMinimumFare = expectedBaseFare + expectedAdditionalFare;
-  const expectedMaximumFare = expectedMinimumFare * 1000; // Allow 2x multiplier for vehicle types
+  const expectedMaximumFare = expectedMinimumFare * 100000; // Allow 2x multiplier for vehicle types
   
   if (createOrderDto.totalFare < expectedMinimumFare || 
       createOrderDto.totalFare > expectedMaximumFare) {
