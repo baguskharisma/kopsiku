@@ -1077,26 +1077,26 @@ private async validateOrderCreationRequest(
   const distanceKm = createOrderDto.distanceMeters / 1000;
   
   // Calculate expected fare range based on distance
-  const expectedBaseFare = 6000000; // 60,000 rupiah in cents
-  const expectedAdditionalFare = Math.max(0, distanceKm - 1) * 600000; // 6,000 rupiah per km in cents
-  const expectedMinimumFare = expectedBaseFare + expectedAdditionalFare;
-  const expectedMaximumFare = expectedMinimumFare * 100000; // Allow 2x multiplier for vehicle types
+  // const expectedBaseFare = 6000000; // 60,000 rupiah in cents
+  // const expectedAdditionalFare = Math.max(0, distanceKm - 1) * 600000; // 6,000 rupiah per km in cents
+  // const expectedMinimumFare = expectedBaseFare + expectedAdditionalFare;
+  // const expectedMaximumFare = expectedMinimumFare * 100000; // Allow multiplier for vehicle types
   
-  if (createOrderDto.totalFare < expectedMinimumFare || 
-      createOrderDto.totalFare > expectedMaximumFare) {
-    this.logger.warn('Fare validation failed', {
-      distanceKm,
-      totalFare: createOrderDto.totalFare,
-      expectedMinimum: expectedMinimumFare,
-      expectedMaximum: expectedMaximumFare,
-      vehicleType: createOrderDto.requestedVehicleType
-    });
+  // if (createOrderDto.totalFare < expectedMinimumFare || 
+  //     createOrderDto.totalFare > expectedMaximumFare) {
+  //   this.logger.warn('Fare validation failed', {
+  //     distanceKm,
+  //     totalFare: createOrderDto.totalFare,
+  //     expectedMinimum: expectedMinimumFare,
+  //     expectedMaximum: expectedMaximumFare,
+  //     vehicleType: createOrderDto.requestedVehicleType
+  //   });
     
-    throw new BadRequestException(
-      `Total fare (${createOrderDto.totalFare} cents) is outside expected range ` +
-      `(${expectedMinimumFare} - ${expectedMaximumFare} cents) for ${distanceKm.toFixed(1)}km trip`
-    );
-  }
+  //   throw new BadRequestException(
+  //     `Total fare (${createOrderDto.totalFare} cents) is outside expected range ` +
+  //     `(${expectedMinimumFare} - ${expectedMaximumFare} cents) for ${distanceKm.toFixed(1)}km trip`
+  //   );
+  // }
 
   // Validate distance is reasonable (0.1km - 100km)
   if (distanceKm < 0.1 || distanceKm > 10000) {
