@@ -3,21 +3,16 @@ import { cookies } from 'next/headers';
 
 const DEFAULT_BACKEND = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api/v1';
 
-// Sesuai dengan dokumentasi Next.js terbaru untuk dynamic route segments
 export async function GET(
   request: NextRequest,
-  context: {
-    params: {
-      id: string
-    }
-  }
+  context: any // Gunakan any untuk menghindari error tipe
 ) {
-  const orderId = context.params.id;
-  const backendUrl = DEFAULT_BACKEND;
-  const cookieStore = cookies();
-  const authCookie = (await cookieStore).get('access_token');
-  
   try {
+    const orderId = context.params.id;
+    const backendUrl = DEFAULT_BACKEND;
+    const cookieStore = cookies();
+    const authCookie = (await cookieStore).get('access_token');
+    
     console.log(`Fetching order details from backend: ${backendUrl}/orders/${orderId}`);
     
     const response = await fetch(`${backendUrl}/orders/${orderId}`, {
