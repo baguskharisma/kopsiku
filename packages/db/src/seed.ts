@@ -1,4 +1,3 @@
-// packages/db/src/seed-manual.ts
 import { PrismaClient, Role, FleetType, FleetStatus, VehicleType, DriverStatus, LocationCategory, TripType, OrderStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 import prompts from 'prompts';
 import * as bcrypt from 'bcrypt';
@@ -26,6 +25,7 @@ type MenuOption =
   | 'otp'
   | 'refreshToken'
   | 'auditLog'
+  | 'bulkSeedFleetData'
   | 'exit';
 
 async function createAppConfigInteractive() {
@@ -197,9 +197,9 @@ async function createDriverProfileInteractive() {
       licenseNumber: resp.licenseNumber || null,
       licenseExpiry: resp.licenseExpiry 
       ? new Date(resp.licenseExpiry) 
-      : '',
+      : new Date('2030-01-01'),
       idCardNumber: resp.idCardNumber || null,
-      address: resp.address || null,
+      address: resp.address || 'Jl. Transportasi No. 1, Pekanbaru',
       emergencyContact: '',
       bankAccount: resp.bankAccount || null,
       bankName: resp.bankName || null,
@@ -389,7 +389,6 @@ async function createFleetAssignmentInteractive() {
   }
 }
 
-
 async function createLocationInteractive() {
   const resp = await prompts([
     { name: 'name', type: 'text', message: 'Location name (ex: Mall SKA)' },
@@ -487,8 +486,8 @@ async function createOrderInteractive() {
       orderNumber: resp.orderNumber || generateOrderNumber(),
       tripType: resp.tripType,
       scheduledAt: resp.scheduledAt ? new Date(resp.scheduledAt) : null,
-      passengerName: extra.passengerName || null,
-      passengerPhone: extra.passengerPhone || null,
+      passengerName: extra.passengerName || "Default Passenger",
+      passengerPhone: extra.passengerPhone || "6281234567890",
       specialRequests: extra.specialRequests || null,
       pickupAddress: resp.pickupAddress,
       pickupLat: resp.pickupLat,
@@ -500,9 +499,9 @@ async function createOrderInteractive() {
       distanceMeters: resp.distanceMeters,
       estimatedDurationMinutes: resp.estimatedDurationMinutes,
       actualDurationMinutes: extra.actualDurationMinutes ?? null,
-      baseFare: BigInt(extra.baseFare ?? 0),
-      distanceFare: BigInt(extra.distanceFare ?? 0),
-      timeFare: BigInt(extra.timeFare ?? 0),
+      baseFare: BigInt(extra.baseFare ?? 50000),
+      distanceFare: BigInt(extra.distanceFare ?? 30000),
+      timeFare: BigInt(extra.timeFare ?? 20000),
       airportFare: BigInt(extra.airportFare ?? 0),
       surgeFare: BigInt(extra.surgeFare ?? 0),
       additionalFare: BigInt(extra.additionalFare ?? 0),
@@ -527,6 +526,208 @@ async function createOrderInteractive() {
   console.log('Created order:', order.id, order.orderNumber);
 }
 
+// Fungsi untuk generate random SIM number
+function generateLicenseNumber() {
+  const prefix = 'SIM';
+  const randomNum = Math.floor(10000000000 + Math.random() * 90000000000);
+  return `${prefix}-${randomNum}`;
+}
+
+// Fungsi untuk generate random KTP number
+function generateIdCardNumber() {
+  // Format KTP Indonesia: 16 digit
+  return Math.floor(1000000000000000 + Math.random() * 9000000000000000).toString();
+}
+
+// Fungsi untuk generate alamat random
+function generateRandomAddress() {
+  const streets = [
+    'Jl. Sudirman', 'Jl. Ahmad Yani', 'Jl. Diponegoro', 'Jl. Gajah Mada', 
+    'Jl. Harapan Raya', 'Jl. Thamrin', 'Jl. Hang Tuah', 'Jl. Kartini', 
+    'Jl. Tuanku Tambusai', 'Jl. HR. Soebrantas'
+  ];
+  const districts = ['Tampan', 'Payung Sekaki', 'Bukit Raya', 'Tenayan Raya', 'Marpoyan Damai', 'Lima Puluh', 'Sail'];
+  
+  const street = streets[Math.floor(Math.random() * streets.length)];
+  const number = Math.floor(1 + Math.random() * 200);
+  const district = districts[Math.floor(Math.random() * districts.length)];
+  
+  return `${street} No. ${number}, ${district}, Pekanbaru`;
+}
+
+// Fungsi untuk memformat nomor telepon
+function formatPhoneNumber(phone: string): string {
+  // Bersihkan nomor telepon dari semua karakter non-numerik
+  const cleanedPhone = phone.replace(/\D/g, '');
+  
+  // Pastikan nomor diawali dengan kode negara Indonesia
+  if (cleanedPhone.startsWith('62')) {
+    return cleanedPhone;
+  } else if (cleanedPhone.startsWith('0')) {
+    return `62${cleanedPhone.substring(1)}`;
+  } else {
+    return `62${cleanedPhone}`;
+  }
+}
+
+// Fungsi untuk membuat username berdasarkan nama
+function generateUsername(name: string): string {
+  // Hapus spasi dan ubah ke lowercase
+  const baseName = name.toLowerCase().replace(/\s+/g, '');
+  
+  // Tambahkan angka random di belakang untuk keunikan
+  const randomNum = Math.floor(100 + Math.random() * 900);
+  return `${baseName}${randomNum}`;
+}
+
+// Data armada dan driver yang akan diseed
+const fleetData = [
+  { plateNumber: 'BM 1856 QU', driverName: 'Endrizal', driverPhone: '08126850120' },
+  { plateNumber: 'BM 1858 QU', driverName: 'Syamsuddin', driverPhone: '081270432500' },
+  { plateNumber: 'BM 1860 QU', driverName: 'Safrizal', driverPhone: '085274658457' },
+  { plateNumber: 'BM 1862 QU', driverName: 'Mardianto', driverPhone: '088279086838' },
+  { plateNumber: 'BM 1863 QU', driverName: 'Syafrizal', driverPhone: '081378334227' },
+  { plateNumber: 'BM 1865 QU', driverName: 'Hotler Sibagariang', driverPhone: '081371573112' },
+  { plateNumber: 'BM 1394 JU', driverName: 'Zalmi', driverPhone: '085351138940' },
+  { plateNumber: 'BM 1399 JU', driverName: 'Jhon Kuntan', driverPhone: '081364476663' },
+  { plateNumber: 'BM 1902 QU', driverName: 'Ari Brewok', driverPhone: '081371663369' },
+  { plateNumber: 'BM 1904 QU', driverName: 'Yusnedi', driverPhone: '08127658449' },
+  { plateNumber: 'BM 1905 QU', driverName: 'Defrizal', driverPhone: '08127634408' },
+  { plateNumber: 'BM 1906 QU', driverName: 'Jaya Adha', driverPhone: '085265456961' },
+  { plateNumber: 'BM 1907 QU', driverName: 'Yakub Efendi', driverPhone: '085264015429' },
+  { plateNumber: 'BM 1924 QU', driverName: 'Ridwan', driverPhone: '085271387541' },
+  { plateNumber: 'BM 1930 QU', driverName: 'Hendrizal', driverPhone: '085194379507' },
+  { plateNumber: 'BM 1933 QU', driverName: 'Azwir', driverPhone: '085278131464' },
+  { plateNumber: 'BM 1955 QU', driverName: 'Harry Yanson Hutabarat', driverPhone: '085271543750' },
+  { plateNumber: 'BM 1956 QU', driverName: 'Sarmi', driverPhone: '081371574888' },
+  { plateNumber: 'BM 1957 QU', driverName: 'Nofrizal', driverPhone: '085274237100' },
+  { plateNumber: 'BM 1404 JU', driverName: 'Adam Cahyadi', driverPhone: '085763579380' },
+];
+
+// Fungsi untuk seeding bulk data armada dan driver
+async function bulkSeedFleetData() {
+  console.log('🚗 Memulai proses seed data armada dan driver...');
+  console.log(`📋 Total data yang akan dibuat: ${fleetData.length} armada dan driver`);
+  
+  // Mapping untuk menyimpan ID user driver dan fleet untuk assignment nantinya
+  const driverMap = new Map<string, string>(); // plateNumber -> userId
+  const fleetMap = new Map<string, string>(); // plateNumber -> fleetId
+  
+  let successCount = 0;
+  let errorCount = 0;
+  
+  for (const item of fleetData) {
+    try {
+      console.log(`\nMemproses data untuk ${item.plateNumber} - ${item.driverName}...`);
+      
+      // 1. Buat user driver
+      const formattedPhone = formatPhoneNumber(item.driverPhone);
+      const username = generateUsername(item.driverName);
+      const defaultPassword = 'Driver123!';
+      const passwordHash = await hashPassword(defaultPassword);
+      
+      const user = await prisma.user.create({
+        data: {
+          name: item.driverName,
+          username: username,
+          phone: formattedPhone,
+          passwordHash: passwordHash || '',
+          role: Role.DRIVER,
+          isActive: true,
+          isVerified: true,
+          lastLoginAt: new Date(),
+        },
+      });
+      
+      console.log(`✅ User driver dibuat: ${user.id} (${user.name})`);
+      driverMap.set(item.plateNumber, user.id);
+      
+      // 2. Buat driver profile
+      const licenseNumber = generateLicenseNumber();
+      const idCardNumber = generateIdCardNumber();
+      const address = generateRandomAddress();
+      const licenseExpiry = new Date('2030-01-01');
+      
+      const driverProfile = await prisma.driverProfile.create({
+        data: {
+          userId: user.id,
+          licenseNumber: licenseNumber,
+          licenseExpiry: licenseExpiry,
+          idCardNumber: idCardNumber,
+          address: address,
+          emergencyContact: formattedPhone, // Gunakan nomor yang sama untuk emergency contact
+          isVerified: true,
+          rating: 4.5 + (Math.random() * 0.5), // Rating antara 4.5 - 5.0
+          totalTrips: Math.floor(Math.random() * 500), // Random trip count
+          completedTrips: Math.floor(Math.random() * 450),
+          cancelledTrips: Math.floor(Math.random() * 50),
+          totalEarnings: BigInt(Math.floor(Math.random() * 10000000)), // Random earnings
+          currentLat: 0.5333 + (Math.random() * 0.02), // Sekitar Pekanbaru
+          currentLng: 101.45 + (Math.random() * 0.02),
+          lastLocationUpdate: new Date(),
+          driverStatus: DriverStatus.ACTIVE,
+          statusChangedAt: new Date(),
+          maxRadius: 10,
+          preferredVehicleTypes: [VehicleType.ECONOMY],
+        },
+      });
+      
+      console.log(`✅ Driver profile dibuat: ${driverProfile.id}`);
+      
+      // 3. Buat fleet/kendaraan
+      const fleet = await prisma.fleet.create({
+        data: {
+          type: FleetType.TAXI,
+          plateNumber: item.plateNumber,
+          model: 'Calya',
+          brand: 'Toyota',
+          year: 2021,
+          color: 'Kuning',
+          capacity: 6,
+          status: FleetStatus.ACTIVE,
+          vehicleType: VehicleType.ECONOMY,
+          basePriceMultiplier: 1.0,
+          engineNumber: `ENG-${Math.floor(10000 + Math.random() * 90000)}`,
+          chassisNumber: `CHS-${Math.floor(10000 + Math.random() * 90000)}`,
+          registrationExpiry: new Date('2026-01-01'),
+          insuranceExpiry: new Date('2026-01-01'),
+        },
+      });
+      
+      console.log(`✅ Fleet dibuat: ${fleet.id} (${fleet.plateNumber})`);
+      fleetMap.set(item.plateNumber, fleet.id);
+      
+      // 4. Buat fleet assignment
+      const assignment = await prisma.fleetAssignment.create({
+        data: {
+          fleetId: fleet.id,
+          driverId: user.id,
+          isActive: true,
+          startedAt: new Date(),
+          notes: 'Penugasan awal via bulk seeder',
+        },
+      });
+      
+      console.log(`✅ Fleet assignment dibuat: ${assignment.id}`);
+      successCount++;
+      
+    } catch (error: any) {
+      console.error(`❌ Error saat memproses ${item.plateNumber}:`, error.message);
+      errorCount++;
+    }
+  }
+  
+  console.log('\n===== SUMMARY =====');
+  console.log(`✅ Berhasil membuat ${successCount} set data`);
+  console.log(`❌ Gagal membuat ${errorCount} set data`);
+  console.log('====================\n');
+  
+  if (successCount > 0) {
+    console.log('Data armada dan driver berhasil dibuat!');
+    console.log('Password default untuk semua driver: Driver123!');
+  }
+}
+
 async function mainMenu() {
   console.log('\n=== KOPSI Manual Seeder CLI ===\n');
 
@@ -542,9 +743,8 @@ async function mainMenu() {
         { title: 'Fleet', value: 'fleet' },
         { title: 'Location', value: 'location' },
         { title: 'Order', value: 'order' },
-        // ==== NEW MENU ITEM ====
         { title: 'Fleet Assignment', value: 'fleetAssignment' },
-        // =======================
+        { title: '🚗 Bulk Seed Armada & Driver', value: 'bulkSeedFleetData' },
         { title: 'Exit', value: 'exit' },
       ],
       initial: 1,
@@ -565,10 +765,8 @@ async function mainMenu() {
         case 'fleet': await createFleetInteractive(); break;
         case 'location': await createLocationInteractive(); break;
         case 'order': await createOrderInteractive(); break;
-        case 'fleetAssignment': 
-          // pastikan fungsi createFleetAssignmentInteractive tersedia di file
-          await createFleetAssignmentInteractive();
-          break;
+        case 'fleetAssignment': await createFleetAssignmentInteractive(); break;
+        case 'bulkSeedFleetData': await bulkSeedFleetData(); break;
         default:
           console.log('Choice not implemented yet:', choice);
       }
@@ -578,10 +776,31 @@ async function mainMenu() {
   }
 }
 
-
 async function main() {
   try {
-    await mainMenu();
+    console.log('KOPSI Database Seeder');
+    console.log('===========================================');
+    console.log('1. Untuk membuat data satu per satu, gunakan menu interaktif');
+    console.log('2. Untuk membuat data armada dan driver secara bulk, pilih opsi "Bulk Seed Armada & Driver"');
+    console.log('===========================================');
+    
+    const action = await prompts({
+      type: 'select',
+      name: 'type',
+      message: 'Pilih jenis seeder:',
+      choices: [
+        { title: 'Interactive Menu', value: 'interactive' },
+        { title: 'Auto Seed Armada & Driver', value: 'auto' },
+      ]
+    });
+    
+    if (action.type === 'interactive') {
+      await mainMenu();
+    } else if (action.type === 'auto') {
+      await bulkSeedFleetData();
+    } else {
+      console.log('Exiting seeder...');
+    }
   } catch (err) {
     console.error('Seeder error:', err);
   } finally {
