@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { MapPin, Navigation, AlertCircle, Check, Coins, Clock } from "lucide-react";
+import { MapPin, Navigation, AlertCircle, Check, Coins, Clock, ArrowUp, ArrowDown } from "lucide-react";
 import { formatRupiah } from "@/lib/utils";
 import { OrderStatus } from "@prisma/client";
 
@@ -45,6 +45,9 @@ interface Order {
   operationalFeePercent?: number;
   operationalFeeStatus?: string;
   operationalFeeConfig?: any;
+  balanceBeforeOperationalFee?: string;
+  balanceAfterOperationalFee?: string;
+  operationalFeeTransactionId?: string;
   driver?: {
     id: string;
     name: string;
@@ -105,8 +108,8 @@ const formatStatus = (status: OrderStatus): string => {
   }
 };
 
-// Helper to format operational fee status
-const formatOperationalFeeStatus = (status?: string): string => {
+// Helper to format service fee status (renamed from operational fee)
+const formatServiceFeeStatus = (status?: string): string => {
   switch (status) {
     case "CHARGED":
       return "Terbayar";
@@ -121,8 +124,8 @@ const formatOperationalFeeStatus = (status?: string): string => {
   }
 };
 
-// Helper to get operational fee status badge color
-const getOperationalFeeStatusColor = (status?: string): string => {
+// Helper to get service fee status badge color
+const getServiceFeeStatusColor = (status?: string): string => {
   switch (status) {
     case "CHARGED":
       return "bg-green-600";
@@ -159,6 +162,12 @@ const formatPaymentMethod = (method?: string): string => {
   }
 };
 
+// Helper to format coin balance
+const formatCoins = (amount?: string): string => {
+  if (!amount) return "0";
+  return new Intl.NumberFormat("id-ID").format(parseInt(amount));
+};
+
 interface OrderDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -190,7 +199,7 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
     }
   };
 
-  // Format fee rule from operational fee config
+  // Format fee rule from service fee config
   const getFeeRule = (): string => {
     if (order.operationalFeeConfig?.feeRule) {
       return order.operationalFeeConfig.feeRule;
@@ -207,7 +216,7 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>Detail Pesanan #{order.orderNumber}</span>
@@ -224,9 +233,9 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Left column */}
-          <div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left column - Trip Information */}
+          <div className="lg:col-span-2">
             <h3 className="text-lg font-semibold mb-2">Informasi Perjalanan</h3>
             
             <div className="space-y-4">
@@ -292,113 +301,8 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
                 </div>
               </>
             )}
-          </div>
 
-          {/* Right column */}
-          <div>
-            <h3 className="text-lg font-semibold mb-2">Rincian Biaya</h3>
-            
-            <Table>
-              <TableBody>
-                <TableRow>
-                  <TableCell>Tarif Dasar</TableCell>
-                  <TableCell className="text-right">
-                    {formatRupiah(parseInt(order.baseFare) / 100)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Tarif Jarak</TableCell>
-                  <TableCell className="text-right">
-                    {formatRupiah(parseInt(order.distanceFare) / 100)}
-                  </TableCell>
-                </TableRow>
-                {order.airportFare && parseInt(order.airportFare) > 0 && (
-                  <TableRow>
-                    <TableCell>Tarif Bandara</TableCell>
-                    <TableCell className="text-right">
-                      {formatRupiah(parseInt(order.airportFare) / 100)}
-                    </TableCell>
-                  </TableRow>
-                )}
-                <TableRow className="font-medium">
-                  <TableCell>Total Tarif</TableCell>
-                  <TableCell className="text-right">
-                    {formatRupiah(parseInt(order.totalFare) / 100)}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-
-            <h3 className="text-lg font-semibold mt-6 mb-2">Biaya Operasional</h3>
-            
-            <div className="rounded-md border p-4 space-y-3">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center">
-                  <Coins className="h-5 w-5 mr-2 text-blue-600" />
-                  <span>Status Pembayaran</span>
-                </div>
-                <Badge
-                  className={`${getOperationalFeeStatusColor(order.operationalFeeStatus)} text-white`}
-                >
-                  {formatOperationalFeeStatus(order.operationalFeeStatus)}
-                </Badge>
-              </div>
-              
-              {order.operationalFeeCoins && parseInt(order.operationalFeeCoins) > 0 ? (
-                <>
-                  <Separator />
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-sm text-muted-foreground">Jumlah Coin</div>
-                      <div className="font-medium">
-                        {new Intl.NumberFormat("id-ID").format(parseInt(order.operationalFeeCoins))} coins
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Persentase</div>
-                      <div className="font-medium">
-                        {order.operationalFeePercent
-                          ? `${(order.operationalFeePercent * 100).toFixed(1)}%`
-                          : "-"}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="text-sm text-muted-foreground">Perhitungan Biaya</div>
-                    <div className="text-sm">
-                      Berdasarkan {getFeeRule()} untuk jarak {(order.distanceMeters / 1000).toFixed(1)} km
-                    </div>
-                  </div>
-                  
-                  {order.operationalFeeStatus === "FAILED" && (
-                    <div className="bg-red-50 p-2 rounded-md flex items-start">
-                      <AlertCircle className="h-4 w-4 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-red-600">
-                        Gagal memproses biaya operasional. Silakan hubungi layanan pelanggan.
-                      </div>
-                    </div>
-                  )}
-                  
-                  {order.operationalFeeStatus === "CHARGED" && (
-                    <div className="bg-green-50 p-2 rounded-md flex items-start">
-                      <Check className="h-4 w-4 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-green-600">
-                        Biaya operasional berhasil diproses
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-muted-foreground text-sm">
-                  {order.operationalFeeStatus === "NOT_APPLICABLE" 
-                    ? "Tidak ada biaya operasional untuk pesanan ini"
-                    : "Informasi biaya operasional tidak tersedia"}
-                </div>
-              )}
-            </div>
-
+            {/* Status Timeline */}
             <h3 className="text-lg font-semibold mt-6 mb-2">Status Timeline</h3>
             <div className="space-y-3">
               <div className="flex items-start">
@@ -499,6 +403,161 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right column - Pricing & Service Fee */}
+          <div>
+            <h3 className="text-lg font-semibold mb-2">Rincian Biaya</h3>
+            
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableCell>Tarif Dasar</TableCell>
+                  <TableCell className="text-right">
+                    {formatRupiah(parseInt(order.baseFare) / 100)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Tarif Jarak</TableCell>
+                  <TableCell className="text-right">
+                    {formatRupiah(parseInt(order.distanceFare) / 100)}
+                  </TableCell>
+                </TableRow>
+                {order.airportFare && parseInt(order.airportFare) > 0 && (
+                  <TableRow>
+                    <TableCell>Tarif Bandara</TableCell>
+                    <TableCell className="text-right">
+                      {formatRupiah(parseInt(order.airportFare) / 100)}
+                    </TableCell>
+                  </TableRow>
+                )}
+                <TableRow className="font-medium">
+                  <TableCell>Total Tarif</TableCell>
+                  <TableCell className="text-right">
+                    {formatRupiah(parseInt(order.totalFare) / 100)}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+
+            <h3 className="text-lg font-semibold mt-6 mb-2">Biaya Layanan</h3>
+            
+            <div className="rounded-md border p-4 space-y-3">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center">
+                  <Coins className="h-5 w-5 mr-2 text-blue-600" />
+                  <span>Status Pembayaran</span>
+                </div>
+                <Badge
+                  className={`${getServiceFeeStatusColor(order.operationalFeeStatus)} text-white`}
+                >
+                  {formatServiceFeeStatus(order.operationalFeeStatus)}
+                </Badge>
+              </div>
+              
+              {order.operationalFeeCoins && parseInt(order.operationalFeeCoins) > 0 ? (
+                <>
+                  <Separator />
+                  
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <div className="text-sm text-muted-foreground">Jumlah Biaya Layanan</div>
+                      <div className="font-medium text-lg">
+                        {formatCoins(order.operationalFeeCoins)} coins
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Persentase</div>
+                      <div className="font-medium">
+                        {order.operationalFeePercent
+                          ? `${(order.operationalFeePercent * 100).toFixed(1)}%`
+                          : "-"}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <Separator />
+
+                  {/* Balance Information */}
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-sm">Informasi Saldo</h4>
+                    
+                    {order.balanceBeforeOperationalFee && (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <ArrowUp className="h-4 w-4 text-gray-600 mr-2" />
+                          <span className="text-sm">Saldo Sebelum</span>
+                        </div>
+                        <div className="font-medium">
+                          {formatCoins(order.balanceBeforeOperationalFee)} coins
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center justify-between text-red-600">
+                      <div className="flex items-center">
+                        <ArrowDown className="h-4 w-4 mr-2" />
+                        <span className="text-sm">Pengurangan</span>
+                      </div>
+                      <div className="font-medium">
+                        -{formatCoins(order.operationalFeeCoins)} coins
+                      </div>
+                    </div>
+                    
+                    {order.balanceAfterOperationalFee && (
+                      <div className="flex items-center justify-between border-t pt-2">
+                        <div className="flex items-center">
+                          <Coins className="h-4 w-4 text-green-600 mr-2" />
+                          <span className="text-sm font-medium">Saldo Setelah</span>
+                        </div>
+                        <div className="font-bold text-green-600">
+                          {formatCoins(order.balanceAfterOperationalFee)} coins
+                        </div>
+                      </div>
+                    )}
+                    
+                    {order.operationalFeeTransactionId && (
+                      <div className="text-xs text-muted-foreground">
+                        ID Transaksi: {order.operationalFeeTransactionId}
+                      </div>
+                    )}
+                  </div>
+
+                  <Separator />
+                  
+                  <div>
+                    <div className="text-sm text-muted-foreground">Perhitungan Biaya</div>
+                    <div className="text-sm">
+                      Berdasarkan {getFeeRule()} untuk jarak {(order.distanceMeters / 1000).toFixed(1)} km
+                    </div>
+                  </div>
+                  
+                  {order.operationalFeeStatus === "FAILED" && (
+                    <div className="bg-red-50 p-2 rounded-md flex items-start">
+                      <AlertCircle className="h-4 w-4 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-red-600">
+                        Gagal memproses biaya layanan. Silakan hubungi layanan pelanggan.
+                      </div>
+                    </div>
+                  )}
+                  
+                  {order.operationalFeeStatus === "CHARGED" && (
+                    <div className="bg-green-50 p-2 rounded-md flex items-start">
+                      <Check className="h-4 w-4 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                      <div className="text-sm text-green-600">
+                        Biaya layanan berhasil diproses
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-muted-foreground text-sm">
+                  {order.operationalFeeStatus === "NOT_APPLICABLE" 
+                    ? "Tidak ada biaya layanan untuk pesanan ini"
+                    : "Informasi biaya layanan tidak tersedia"}
                 </div>
               )}
             </div>

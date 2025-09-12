@@ -65,6 +65,10 @@ interface Order {
   operationalFeeCoins?: string;
   operationalFeePercent?: number;
   operationalFeeStatus?: string;
+  // New fields for balance tracking
+  balanceBeforeOperationalFee?: string;
+  balanceAfterOperationalFee?: string;
+  operationalFeeTransactionId?: string;
 }
 
 interface PaginationMeta {
@@ -126,8 +130,8 @@ const formatStatus = (status: OrderStatus): string => {
   }
 };
 
-// Helper to format operational fee status
-const formatOperationalFeeStatus = (status?: string): string => {
+// Helper to format service fee status (renamed from operational fee)
+const formatServiceFeeStatus = (status?: string): string => {
   switch (status) {
     case "CHARGED":
       return "Terbayar";
@@ -142,8 +146,8 @@ const formatOperationalFeeStatus = (status?: string): string => {
   }
 };
 
-// Helper to get operational fee status badge color
-const getOperationalFeeStatusColor = (status?: string): string => {
+// Helper to get service fee status badge color
+const getServiceFeeStatusColor = (status?: string): string => {
   switch (status) {
     case "CHARGED":
       return "bg-green-600";
@@ -156,6 +160,12 @@ const getOperationalFeeStatusColor = (status?: string): string => {
     default:
       return "bg-gray-400";
   }
+};
+
+// Helper to format coin balance
+const formatCoins = (amount?: string): string => {
+  if (!amount) return "0";
+  return new Intl.NumberFormat("id-ID").format(parseInt(amount));
 };
 
 export default function OrderHistoryPage() {
@@ -375,7 +385,7 @@ export default function OrderHistoryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -385,7 +395,9 @@ export default function OrderHistoryPage() {
                   <TableHead>Rute</TableHead>
                   <TableHead>Tipe Kendaraan</TableHead>
                   <TableHead>Harga</TableHead>
-                  <TableHead>Biaya Operasional</TableHead>
+                  <TableHead>Biaya Layanan</TableHead>
+                  <TableHead>Saldo Sebelum</TableHead>
+                  <TableHead>Saldo Setelah</TableHead>
                   <TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -415,6 +427,12 @@ export default function OrderHistoryPage() {
                       <TableCell>
                         <Skeleton className="h-5 w-20" />
                       </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-20" />
+                      </TableCell>
                       <TableCell className="text-right">
                         <Skeleton className="h-9 w-9 rounded-md ml-auto" />
                       </TableCell>
@@ -423,7 +441,7 @@ export default function OrderHistoryPage() {
                 ) : orders.length === 0 ? (
                   // Empty state
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-6">
+                    <TableCell colSpan={10} className="text-center py-6">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Icons.inbox className="h-10 w-10 text-muted-foreground" />
                         <p className="text-muted-foreground font-medium">
@@ -491,26 +509,55 @@ export default function OrderHistoryPage() {
                       <TableCell>
                         <div className="flex flex-col">
                           <Badge
-                            className={`mb-1 w-fit ${getOperationalFeeStatusColor(
+                            className={`mb-1 w-fit ${getServiceFeeStatusColor(
                               order.operationalFeeStatus
                             )} text-white`}
                           >
-                            {formatOperationalFeeStatus(
+                            {formatServiceFeeStatus(
                               order.operationalFeeStatus
                             )}
                           </Badge>
                           {order.operationalFeeCoins && (
-                            <span>
-                              {new Intl.NumberFormat("id-ID").format(
-                                parseInt(order.operationalFeeCoins)
-                              )}{" "}
-                              coins
+                            <span className="text-sm">
+                              {formatCoins(order.operationalFeeCoins)} coins
                             </span>
                           )}
                           {order.operationalFeePercent && (
                             <span className="text-xs text-muted-foreground">
                               ({(order.operationalFeePercent * 100).toFixed(1)}%)
                             </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {order.balanceBeforeOperationalFee ? (
+                            <>
+                              <span className="font-medium">
+                                {formatCoins(order.balanceBeforeOperationalFee)}
+                              </span>
+                              <span className="text-muted-foreground ml-1">
+                                coins
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {order.balanceAfterOperationalFee ? (
+                            <>
+                              <span className="font-medium">
+                                {formatCoins(order.balanceAfterOperationalFee)}
+                              </span>
+                              <span className="text-muted-foreground ml-1">
+                                coins
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
                           )}
                         </div>
                       </TableCell>

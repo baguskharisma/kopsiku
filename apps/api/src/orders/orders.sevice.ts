@@ -1053,6 +1053,13 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
       distanceFare: order.distanceFare.toString(),
       airportFare: order.airportFare.toString(),
       totalFare: order.totalFare.toString(),
+       // Ensure these fields are included and properly formatted
+    operationalFeeCoins: order.operationalFeeCoins?.toString(),
+    operationalFeePercent: order.operationalFeePercent,
+    operationalFeeStatus: order.operationalFeeStatus,
+    operationalFeeConfig: order.operationalFeeConfig,
+    operationalFeeTransactionId: order.operationalFeeTransactionId,
+    // New balance fields will be added by the calling methods
     };
   }
 
@@ -1587,71 +1594,25 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
     return degrees * (Math.PI / 180);
   }
 
-  // Keep all existing methods...
-  async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
-    const { status, driverId, customerId, dateFrom, dateTo, page = 1, limit = 10 } = filters;
+  // Update method findAll untuk include balance information
+async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
+  const { status, driverId, customerId, dateFrom, dateTo, page = 1, limit = 10 } = filters;
 
-    const where: Prisma.OrderWhereInput = {
-      ...(status && { status }),
-      ...(driverId && { driverId }),
-      ...(customerId && { customerId }),
-      ...(dateFrom || dateTo) && {
-        createdAt: {
-          ...(dateFrom && { gte: new Date(dateFrom) }),
-          ...(dateTo && { lte: new Date(dateTo) }),
-        },
+  const where: Prisma.OrderWhereInput = {
+    ...(status && { status }),
+    ...(driverId && { driverId }),
+    ...(customerId && { customerId }),
+    ...(dateFrom || dateTo) && {
+      createdAt: {
+        ...(dateFrom && { gte: new Date(dateFrom) }),
+        ...(dateTo && { lte: new Date(dateTo) }),
       },
-    };
+    },
+  };
 
-    const [orders, total] = await Promise.all([
-      this.prisma.order.findMany({
-        where,
-        include: {
-          fleet: true,
-          driver: {
-            select: {
-              id: true,
-              name: true,
-              phone: true,
-              driverProfile: {
-                select: {
-                  rating: true,
-                  driverStatus: true,
-                  currentLat: true,
-                  currentLng: true,
-                }
-              }
-            }
-          },
-          customer: {
-            select: {
-              id: true,
-              name: true,
-              phone: true,
-            }
-          }
-        },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.order.count({ where }),
-    ]);
-
-    return {
-      data: orders.map(order => this.transformOrderResponse(order)),
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
-  }
-
-  async findOne(id: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { id },
+  const [orders, total] = await Promise.all([
+    this.prisma.order.findMany({
+      where,
       include: {
         fleet: true,
         driver: {
@@ -1676,18 +1637,120 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
             phone: true,
           }
         },
-        statusHistory: {
-          orderBy: { createdAt: 'asc' }
+        // Include coin transactions untuk balance information
+        coinTransactions: {
+          where: {
+            type: CoinTransactionType.OPERATIONAL_FEE,
+            status: CoinTransactionStatus.COMPLETED,
+          },
+          select: {
+            id: true,
+            balanceBefore: true,
+            balanceAfter: true,
+            amount: true,
+          },
+          take: 1,
         }
       },
-    });
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    this.prisma.order.count({ where }),
+  ]);
 
-    if (!order) {
-      throw new NotFoundException('Order not found');
+  // Transform orders dengan balance information
+  const transformedOrders = orders.map(order => {
+    const transformedOrder = this.transformOrderResponse(order);
+    
+    // Add balance information from coin transaction if available
+    const coinTransaction = order.coinTransactions?.[0];
+    if (coinTransaction) {
+      transformedOrder.balanceBeforeOperationalFee = coinTransaction.balanceBefore.toString();
+      transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
+      transformedOrder.operationalFeeTransactionId = coinTransaction.id;
     }
+    
+    return transformedOrder;
+  });
 
-    return this.transformOrderResponse(order);
+  return {
+    data: transformedOrders,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
+
+  // Update method findOne untuk include balance information
+async findOne(id: string) {
+  const order = await this.prisma.order.findUnique({
+    where: { id },
+    include: {
+      fleet: true,
+      driver: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          driverProfile: {
+            select: {
+              rating: true,
+              driverStatus: true,
+              currentLat: true,
+              currentLng: true,
+            }
+          }
+        }
+      },
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+        }
+      },
+      statusHistory: {
+        orderBy: { createdAt: 'asc' }
+      },
+      // Include coin transactions untuk balance information
+      coinTransactions: {
+        where: {
+          type: CoinTransactionType.OPERATIONAL_FEE,
+          status: CoinTransactionStatus.COMPLETED,
+        },
+        select: {
+          id: true,
+          balanceBefore: true,
+          balanceAfter: true,
+          amount: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      }
+    },
+  });
+
+  if (!order) {
+    throw new NotFoundException('Order not found');
   }
+
+  const transformedOrder = this.transformOrderResponse(order);
+  
+  // Add balance information from coin transaction if available
+  const coinTransaction = order.coinTransactions?.[0];
+  if (coinTransaction) {
+    transformedOrder.balanceBeforeOperationalFee = coinTransaction.balanceBefore.toString();
+    transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
+    transformedOrder.operationalFeeTransactionId = coinTransaction.id;
+  }
+
+  return transformedOrder;
+}
 
   private getValidStatusTransitions(currentStatus: OrderStatus): OrderStatus[] {
     const transitions: Record<OrderStatus, OrderStatus[]> = {
@@ -1742,6 +1805,43 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
   //     throw new BadRequestException('Total fare cannot be less than base fare');
   //   }
   // }
+
+  // Method untuk mengambil balance information dari coin transaction
+async getOrderBalanceInfo(orderId: string): Promise<{
+  balanceBeforeOperationalFee?: string;
+  balanceAfterOperationalFee?: string;
+  operationalFeeTransactionId?: string;
+} | null> {
+  try {
+    // Cari coin transaction untuk operational fee order ini
+    const coinTransaction = await this.prisma.coinTransaction.findFirst({
+      where: {
+        orderId: orderId,
+        type: CoinTransactionType.OPERATIONAL_FEE,
+        status: CoinTransactionStatus.COMPLETED,
+      },
+      select: {
+        id: true,
+        balanceBefore: true,
+        balanceAfter: true,
+        amount: true,
+      },
+    });
+
+    if (!coinTransaction) {
+      return null;
+    }
+
+    return {
+      balanceBeforeOperationalFee: coinTransaction.balanceBefore.toString(),
+      balanceAfterOperationalFee: coinTransaction.balanceAfter.toString(), 
+      operationalFeeTransactionId: coinTransaction.id,
+    };
+  } catch (error) {
+    this.logger.error(`Failed to get balance info for order ${orderId}:`, error);
+    return null;
+  }
+}
 
   private async generateOrderNumber(): Promise<string> {
     const today = new Date();
