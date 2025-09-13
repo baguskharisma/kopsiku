@@ -420,7 +420,7 @@ export default function OrderHistoryPage() {
                   <TableHead>Tipe Kendaraan</TableHead>
                   <TableHead>Harga</TableHead>
                   <TableHead>Biaya Layanan</TableHead>
-                  <TableHead>Nilai Bersih Driver</TableHead>
+                  <TableHead>Netto</TableHead>
                   <TableHead>Saldo Sebelum</TableHead>
                   <TableHead>Saldo Setelah</TableHead>
                   <TableHead className="text-right">Aksi</TableHead>

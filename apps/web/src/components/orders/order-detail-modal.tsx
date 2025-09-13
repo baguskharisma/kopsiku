@@ -501,7 +501,7 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
   <div className="flex justify-between items-center">
     <div className="flex items-center">
       <Banknote className="h-5 w-5 mr-2 text-green-600" />
-      <span>Nilai Bersih Driver</span>
+      <span>Netto</span>
     </div>
     <div className="font-bold text-green-700 text-lg">
       {formatRupiah(earningsBreakdown.driverNetEarnings)}
