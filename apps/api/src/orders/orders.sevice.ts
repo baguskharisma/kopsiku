@@ -891,6 +891,86 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
     return config;
   }
 
+  async getDriverEarningsSummary(driverId: string, dateFrom?: string, dateTo?: string) {
+    const where: Prisma.OrderWhereInput = {
+      driverId,
+      status: OrderStatus.COMPLETED,
+      ...(dateFrom || dateTo) && {
+        createdAt: {
+          ...(dateFrom && { gte: new Date(dateFrom) }),
+          ...(dateTo && { lte: new Date(dateTo) }),
+        },
+      },
+    };
+  
+    const orders = await this.prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        orderNumber: true,
+        totalFare: true,
+        operationalFeeCoins: true,
+        createdAt: true,
+      },
+    });
+  
+    let totalGrossEarnings = BigInt(0); // Total fare dari semua order
+    let totalOperationalFees = BigInt(0); // Total operational fees dalam rupiah
+    let totalNetEarnings = BigInt(0); // Net earnings setelah potong operational fee
+    
+    const earningsBreakdown = orders.map(order => {
+      const grossEarnings = order.totalFare; // Total fare in cents
+      const operationalFeeRupiah = order.operationalFeeCoins ? BigInt(order.operationalFeeCoins) : BigInt(0);
+      const operationalFeeCents = operationalFeeRupiah * BigInt(100); // Convert to cents
+      const netEarnings = grossEarnings - operationalFeeCents;
+  
+      totalGrossEarnings += grossEarnings;
+      totalOperationalFees += operationalFeeCents;
+      totalNetEarnings += netEarnings;
+  
+      return {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        date: order.createdAt,
+        grossEarnings: grossEarnings.toString(),
+        operationalFee: operationalFeeCents.toString(),
+        netEarnings: netEarnings.toString(),
+        // Formatted for display
+        grossEarningsRupiah: (Number(grossEarnings) / 100).toFixed(2),
+        operationalFeeRupiah: (Number(operationalFeeCents) / 100).toFixed(2),
+        netEarningsRupiah: (Number(netEarnings) / 100).toFixed(2),
+      };
+    });
+  
+    return {
+      summary: {
+        totalOrders: orders.length,
+        totalGrossEarnings: totalGrossEarnings.toString(),
+        totalOperationalFees: totalOperationalFees.toString(),
+        totalNetEarnings: totalNetEarnings.toString(),
+        averageNetEarningsPerOrder: orders.length > 0 
+          ? (totalNetEarnings / BigInt(orders.length)).toString() 
+          : "0",
+        // Formatted values
+        totalGrossEarningsRupiah: (Number(totalGrossEarnings) / 100).toLocaleString('id-ID'),
+        totalOperationalFeesRupiah: (Number(totalOperationalFees) / 100).toLocaleString('id-ID'),
+        totalNetEarningsRupiah: (Number(totalNetEarnings) / 100).toLocaleString('id-ID'),
+        operationalFeePercentage: totalGrossEarnings > 0 
+          ? ((Number(totalOperationalFees) / Number(totalGrossEarnings)) * 100).toFixed(2) 
+          : "0",
+      },
+      breakdown: earningsBreakdown,
+      calculation: {
+        formula: "Net Earnings = Total Fare - Operational Fee",
+        notes: [
+          "Total fare includes all components (base + distance + airport)",
+          "Airport fee is charged to passenger, not deducted from driver",
+          "Only operational fee (biaya layanan) is deducted from driver earnings"
+        ]
+      }
+    };
+  }
+
   // FIXED: Process operational fee within transaction context
   // private async processOperationalFeeInTransaction(
   //   tx: any,
@@ -1047,20 +1127,54 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
   
    // Helper method to transform BigInt fields to strings
    private transformOrderResponse(order: any) {
+    // Calculate driver net earnings
+    const driverNetEarnings = this.calculateDriverNetEarnings(order);
+    
+    // Log calculation in development/debug mode
+    if (process.env.NODE_ENV !== 'production') {
+      this.logDriverEarningsCalculation(order);
+    }
+    
     return {
       ...order,
       baseFare: order.baseFare.toString(),
       distanceFare: order.distanceFare.toString(),
-      airportFare: order.airportFare.toString(),
+      airportFare: order.airportFare?.toString() || "0",
       totalFare: order.totalFare.toString(),
-       // Ensure these fields are included and properly formatted
-    operationalFeeCoins: order.operationalFeeCoins?.toString(),
-    operationalFeePercent: order.operationalFeePercent,
-    operationalFeeStatus: order.operationalFeeStatus,
-    operationalFeeConfig: order.operationalFeeConfig,
-    operationalFeeTransactionId: order.operationalFeeTransactionId,
-    // New balance fields will be added by the calling methods
+      // Service fee fields
+      operationalFeeCoins: order.operationalFeeCoins?.toString(),
+      operationalFeePercent: order.operationalFeePercent,
+      operationalFeeStatus: order.operationalFeeStatus,
+      operationalFeeConfig: order.operationalFeeConfig,
+      operationalFeeTransactionId: order.operationalFeeTransactionId,
+      // CORRECTED: Driver net earnings (Total Fare - Operational Fee)
+      driverNetEarnings,
     };
+  }
+
+  private calculateDriverNetEarnings(order: any): string {
+    try {
+      const totalFareRupiah = Number(order.totalFare) / 100; // Convert cents to rupiah
+      
+      // Get operational fee in coins, then convert to rupiah
+      let operationalFeeRupiah = 0;
+      if (order.operationalFeeCoins) {
+        // Assuming 1 coin = 1 rupiah (adjust conversion rate if different)
+        operationalFeeRupiah = Number(order.operationalFeeCoins);
+      }
+      
+      // Driver gets total fare minus operational fee
+      // Airport fee is charged to passenger, so driver gets full airport fee portion
+      const driverNetEarnings = totalFareRupiah - operationalFeeRupiah;
+      
+      // Convert back to cents for consistency with other fields
+      const driverNetEarningsCents = Math.max(0, Math.round(driverNetEarnings * 100));
+      
+      return driverNetEarningsCents.toString();
+    } catch (error) {
+      this.logger.error(`Failed to calculate driver earnings for order ${order.id}:`, error);
+      return "0";
+    }
   }
 
   private validateFareCalculation(createOrderDto: CreateOrderDto) {
@@ -1188,6 +1302,27 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
       }
       throw error;
     }
+  }
+
+  private logDriverEarningsCalculation(order: any): void {
+    const totalFareRupiah = Number(order.totalFare) / 100;
+    const operationalFeeCoins = order.operationalFeeCoins ? Number(order.operationalFeeCoins) : 0;
+    const operationalFeeRupiah = operationalFeeCoins; // 1:1 conversion
+    const driverNetEarningsRupiah = totalFareRupiah - operationalFeeRupiah;
+    
+    this.logger.log(`Driver earnings calculation for order ${order.orderNumber}`, {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      calculation: {
+        totalFareCents: order.totalFare.toString(),
+        totalFareRupiah: totalFareRupiah.toFixed(2),
+        operationalFeeCoins: operationalFeeCoins.toString(),
+        operationalFeeRupiah: operationalFeeRupiah.toFixed(2),
+        driverNetEarningsRupiah: driverNetEarningsRupiah.toFixed(2),
+        formula: "Driver Net = Total Fare (Rp) - Operational Fee (Rp)"
+      },
+      notes: "Airport fee is charged directly to passenger, not deducted from driver earnings"
+    });
   }
 
   async updateStatus(orderId: string, updateOrderStatusDto: UpdateOrderStatusDto, userId?: string) {
@@ -1595,24 +1730,102 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
   }
 
   // Update method findAll untuk include balance information
-async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
-  const { status, driverId, customerId, dateFrom, dateTo, page = 1, limit = 10 } = filters;
-
-  const where: Prisma.OrderWhereInput = {
-    ...(status && { status }),
-    ...(driverId && { driverId }),
-    ...(customerId && { customerId }),
-    ...(dateFrom || dateTo) && {
-      createdAt: {
-        ...(dateFrom && { gte: new Date(dateFrom) }),
-        ...(dateTo && { lte: new Date(dateTo) }),
+  async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
+    const { status, driverId, customerId, dateFrom, dateTo, page = 1, limit = 10 } = filters;
+  
+    const where: Prisma.OrderWhereInput = {
+      ...(status && { status }),
+      ...(driverId && { driverId }),
+      ...(customerId && { customerId }),
+      ...(dateFrom || dateTo) && {
+        createdAt: {
+          ...(dateFrom && { gte: new Date(dateFrom) }),
+          ...(dateTo && { lte: new Date(dateTo) }),
+        },
       },
-    },
-  };
+    };
+  
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        include: {
+          fleet: true,
+          driver: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+              driverProfile: {
+                select: {
+                  rating: true,
+                  driverStatus: true,
+                  currentLat: true,
+                  currentLng: true,
+                }
+              }
+            }
+          },
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              phone: true,
+            }
+          },
+          // Include coin transactions untuk balance information
+          coinTransactions: {
+            where: {
+              type: CoinTransactionType.OPERATIONAL_FEE,
+              status: CoinTransactionStatus.COMPLETED,
+            },
+            select: {
+              id: true,
+              balanceBefore: true,
+              balanceAfter: true,
+              amount: true,
+            },
+            take: 1,
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+  
+    // Transform orders dengan balance information dan driver earnings
+    const transformedOrders = orders.map(order => {
+      const transformedOrder = this.transformOrderResponse(order);
+      
+      // Add balance information from coin transaction if available
+      const coinTransaction = order.coinTransactions?.[0];
+      if (coinTransaction) {
+        transformedOrder.balanceBeforeOperationalFee = coinTransaction.balanceBefore.toString();
+        transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
+        transformedOrder.operationalFeeTransactionId = coinTransaction.id;
+      }
+      
+      // Driver earnings sudah di-calculate di transformOrderResponse
+      
+      return transformedOrder;
+    });
+  
+    return {
+      data: transformedOrders,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
 
-  const [orders, total] = await Promise.all([
-    this.prisma.order.findMany({
-      where,
+  // Update method findOne untuk include balance information
+  async findOne(id: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
       include: {
         fleet: true,
         driver: {
@@ -1637,6 +1850,9 @@ async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
             phone: true,
           }
         },
+        statusHistory: {
+          orderBy: { createdAt: 'asc' }
+        },
         // Include coin transactions untuk balance information
         coinTransactions: {
           where: {
@@ -1648,19 +1864,18 @@ async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
             balanceBefore: true,
             balanceAfter: true,
             amount: true,
+            createdAt: true,
           },
+          orderBy: { createdAt: 'desc' },
           take: 1,
         }
       },
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    this.prisma.order.count({ where }),
-  ]);
-
-  // Transform orders dengan balance information
-  const transformedOrders = orders.map(order => {
+    });
+  
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+  
     const transformedOrder = this.transformOrderResponse(order);
     
     // Add balance information from coin transaction if available
@@ -1670,87 +1885,11 @@ async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
       transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
       transformedOrder.operationalFeeTransactionId = coinTransaction.id;
     }
-    
-    return transformedOrder;
-  });
-
-  return {
-    data: transformedOrders,
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
-}
-
-  // Update method findOne untuk include balance information
-async findOne(id: string) {
-  const order = await this.prisma.order.findUnique({
-    where: { id },
-    include: {
-      fleet: true,
-      driver: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-          driverProfile: {
-            select: {
-              rating: true,
-              driverStatus: true,
-              currentLat: true,
-              currentLng: true,
-            }
-          }
-        }
-      },
-      customer: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-        }
-      },
-      statusHistory: {
-        orderBy: { createdAt: 'asc' }
-      },
-      // Include coin transactions untuk balance information
-      coinTransactions: {
-        where: {
-          type: CoinTransactionType.OPERATIONAL_FEE,
-          status: CoinTransactionStatus.COMPLETED,
-        },
-        select: {
-          id: true,
-          balanceBefore: true,
-          balanceAfter: true,
-          amount: true,
-          createdAt: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      }
-    },
-  });
-
-  if (!order) {
-    throw new NotFoundException('Order not found');
-  }
-
-  const transformedOrder = this.transformOrderResponse(order);
   
-  // Add balance information from coin transaction if available
-  const coinTransaction = order.coinTransactions?.[0];
-  if (coinTransaction) {
-    transformedOrder.balanceBeforeOperationalFee = coinTransaction.balanceBefore.toString();
-    transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
-    transformedOrder.operationalFeeTransactionId = coinTransaction.id;
+    // Driver earnings sudah di-calculate di transformOrderResponse
+  
+    return transformedOrder;
   }
-
-  return transformedOrder;
-}
 
   private getValidStatusTransitions(currentStatus: OrderStatus): OrderStatus[] {
     const transitions: Record<OrderStatus, OrderStatus[]> = {
@@ -1852,7 +1991,7 @@ async getOrderBalanceInfo(orderId: string): Promise<{
     const randomStr = Math.random().toString(36).substring(2, 8);
     
     // Format: TXK-YYYYMMDD-TIMESTAMP-RANDOM
-    const orderNumber = `TXK-${dateStr}-${timestamp}-${randomStr}`;
+    const orderNumber = `TXK-${dateStr}-${randomStr}`;
     
     // Double-check apakah nomor ini sudah ada di database
     const existingOrder = await this.prisma.order.findUnique({

@@ -59,16 +59,19 @@ interface Order {
   totalFare: string;
   baseFare: string;
   distanceFare: string;
+  airportFare?: string;
   requestedVehicleType: string;
   distanceMeters: number;
   estimatedDurationMinutes: number;
   operationalFeeCoins?: string;
   operationalFeePercent?: number;
   operationalFeeStatus?: string;
-  // New fields for balance tracking
+  // Balance fields
   balanceBeforeOperationalFee?: string;
   balanceAfterOperationalFee?: string;
   operationalFeeTransactionId?: string;
+  // New driver earnings field
+  driverNetEarnings?: string;
 }
 
 interface PaginationMeta {
@@ -166,6 +169,27 @@ const getServiceFeeStatusColor = (status?: string): string => {
 const formatCoins = (amount?: string): string => {
   if (!amount) return "0";
   return new Intl.NumberFormat("id-ID").format(parseInt(amount));
+};
+
+// Helper to calculate driver net earnings
+const calculateDriverNetEarnings = (order: Order): string => {
+  try {
+    const totalFare = parseInt(order.totalFare) / 100;
+    const operationalFeeRupiah = order.operationalFeeCoins ? 
+      parseInt(order.operationalFeeCoins) : 0;
+    
+    const driverNetEarnings = totalFare - operationalFeeRupiah;
+    
+    // Format TANPA koma - bilangan bulat
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(Math.round(Math.max(0, driverNetEarnings)));
+  } catch (error) {
+    return "Rp 0";
+  }
 };
 
 export default function OrderHistoryPage() {
@@ -396,6 +420,7 @@ export default function OrderHistoryPage() {
                   <TableHead>Tipe Kendaraan</TableHead>
                   <TableHead>Harga</TableHead>
                   <TableHead>Biaya Layanan</TableHead>
+                  <TableHead>Nilai Bersih Driver</TableHead>
                   <TableHead>Saldo Sebelum</TableHead>
                   <TableHead>Saldo Setelah</TableHead>
                   <TableHead className="text-right">Aksi</TableHead>
@@ -428,6 +453,9 @@ export default function OrderHistoryPage() {
                         <Skeleton className="h-5 w-20" />
                       </TableCell>
                       <TableCell>
+                        <Skeleton className="h-5 w-24" />
+                      </TableCell>
+                      <TableCell>
                         <Skeleton className="h-5 w-20" />
                       </TableCell>
                       <TableCell>
@@ -441,7 +469,7 @@ export default function OrderHistoryPage() {
                 ) : orders.length === 0 ? (
                   // Empty state
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-6">
+                    <TableCell colSpan={11} className="text-center py-6">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Icons.inbox className="h-10 w-10 text-muted-foreground" />
                         <p className="text-muted-foreground font-medium">
@@ -527,6 +555,11 @@ export default function OrderHistoryPage() {
                               ({(order.operationalFeePercent * 100).toFixed(1)}%)
                             </span>
                           )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm font-medium text-green-700">
+                          {calculateDriverNetEarnings(order)}
                         </div>
                       </TableCell>
                       <TableCell>

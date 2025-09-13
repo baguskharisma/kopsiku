@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { MapPin, Navigation, AlertCircle, Check, Coins, Clock, ArrowUp, ArrowDown } from "lucide-react";
+import { MapPin, Navigation, AlertCircle, Check, Coins, Clock, ArrowUp, ArrowDown, Wallet, Banknote } from "lucide-react";
 import { formatRupiah } from "@/lib/utils";
 import { OrderStatus } from "@prisma/client";
 
@@ -48,6 +48,7 @@ interface Order {
   balanceBeforeOperationalFee?: string;
   balanceAfterOperationalFee?: string;
   operationalFeeTransactionId?: string;
+  driverNetEarnings?: string;
   driver?: {
     id: string;
     name: string;
@@ -168,6 +169,53 @@ const formatCoins = (amount?: string): string => {
   return new Intl.NumberFormat("id-ID").format(parseInt(amount));
 };
 
+// Helper to calculate driver net earnings
+const calculateDriverNetEarnings = (order: Order): string => {
+  try {
+    const totalFare = parseInt(order.totalFare) / 100;
+    const operationalFeeRupiah = order.operationalFeeCoins ? 
+      parseInt(order.operationalFeeCoins) : 0;
+    
+    const driverNetEarnings = totalFare - operationalFeeRupiah;
+    
+    // Format TANPA koma - bilangan bulat
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(Math.round(Math.max(0, driverNetEarnings)));
+  } catch (error) {
+    return "Rp 0";
+  }
+};
+
+// Helper to calculate breakdown values
+const calculateEarningsBreakdown = (order: Order) => {
+  const totalFare = parseInt(order.totalFare) / 100;
+  const airportFare = order.airportFare ? parseInt(order.airportFare) / 100 : 0;
+  const baseFare = parseInt(order.baseFare) / 100;
+  const distanceFare = parseInt(order.distanceFare) / 100;
+  
+  // Calculate operational fee in Rupiah
+  let operationalFeeRupiah = 0;
+  if (order.operationalFeeCoins && order.operationalFeePercent) {
+    // Convert operational fee from coins to Rupiah (assuming 1 coin = 1 rupiah)
+    operationalFeeRupiah = parseInt(order.operationalFeeCoins);
+  }
+  
+  return {
+    totalFare,
+    airportFare,
+    baseFare,
+    distanceFare,
+    operationalFeeRupiah,
+    driverNetEarnings: Math.max(0, totalFare - operationalFeeRupiah), // Driver gets total fare minus operational fee
+    platformShare: operationalFeeRupiah, // Operational fee goes to platform
+  };
+};
+
+
 interface OrderDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -214,9 +262,11 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
     }
   };
 
+  const earningsBreakdown = calculateEarningsBreakdown(order);
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>Detail Pesanan #{order.orderNumber}</span>
@@ -408,8 +458,9 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
             </div>
           </div>
 
-          {/* Right column - Pricing & Service Fee */}
+          {/* Right column - Financial Information */}
           <div>
+            {/* Fare Breakdown */}
             <h3 className="text-lg font-semibold mb-2">Rincian Biaya</h3>
             
             <Table>
@@ -417,32 +468,79 @@ export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalPro
                 <TableRow>
                   <TableCell>Tarif Dasar</TableCell>
                   <TableCell className="text-right">
-                    {formatRupiah(parseInt(order.baseFare) / 100)}
+                    {formatRupiah(earningsBreakdown.baseFare)}
                   </TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>Tarif Jarak</TableCell>
                   <TableCell className="text-right">
-                    {formatRupiah(parseInt(order.distanceFare) / 100)}
+                    {formatRupiah(earningsBreakdown.distanceFare)}
                   </TableCell>
                 </TableRow>
-                {order.airportFare && parseInt(order.airportFare) > 0 && (
+                {earningsBreakdown.airportFare > 0 && (
                   <TableRow>
                     <TableCell>Tarif Bandara</TableCell>
                     <TableCell className="text-right">
-                      {formatRupiah(parseInt(order.airportFare) / 100)}
+                      {formatRupiah(earningsBreakdown.airportFare)}
                     </TableCell>
                   </TableRow>
                 )}
                 <TableRow className="font-medium">
                   <TableCell>Total Tarif</TableCell>
                   <TableCell className="text-right">
-                    {formatRupiah(parseInt(order.totalFare) / 100)}
+                    {formatRupiah(earningsBreakdown.totalFare)}
                   </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
 
+            {/* Driver Earnings Section */}
+            <h3 className="text-lg font-semibold mt-6 mb-2">Pendapatan Driver</h3>
+            
+            <div className="rounded-md border p-4 space-y-3">
+  <div className="flex justify-between items-center">
+    <div className="flex items-center">
+      <Banknote className="h-5 w-5 mr-2 text-green-600" />
+      <span>Nilai Bersih Driver</span>
+    </div>
+    <div className="font-bold text-green-700 text-lg">
+      {formatRupiah(earningsBreakdown.driverNetEarnings)}
+    </div>
+  </div>
+  
+  <Separator />
+  
+  <div className="space-y-2 text-sm">
+    <div className="flex justify-between">
+      <span>Total Tarif</span>
+      <span>{formatRupiah(earningsBreakdown.totalFare)}</span>
+    </div>
+    
+    {earningsBreakdown.operationalFeeRupiah > 0 && (
+      <div className="flex justify-between text-red-600">
+        <span>Biaya Layanan Platform</span>
+        <span>-{formatRupiah(earningsBreakdown.operationalFeeRupiah)}</span>
+      </div>
+    )}
+    
+    <Separator />
+    
+    <div className="flex justify-between font-medium text-green-700">
+      <span>Yang Diterima Driver</span>
+      <span>{formatRupiah(earningsBreakdown.driverNetEarnings)}</span>
+    </div>
+  </div>
+  
+  {earningsBreakdown.operationalFeeRupiah > 0 && (
+    <div className="bg-blue-50 p-2 rounded-md">
+      <div className="text-xs text-blue-600">
+        <strong>Catatan:</strong> Biaya layanan platform digunakan untuk operasional sistem dan tidak diberikan kepada driver. Cas bandara (jika ada) dibebankan langsung ke penumpang.
+      </div>
+    </div>
+  )}
+</div>
+
+            {/* Service Fee Section */}
             <h3 className="text-lg font-semibold mt-6 mb-2">Biaya Layanan</h3>
             
             <div className="rounded-md border p-4 space-y-3">

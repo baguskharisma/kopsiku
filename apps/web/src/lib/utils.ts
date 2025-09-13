@@ -10,14 +10,14 @@ export function cn(...inputs: ClassValue[]) {
  * @param amount - The amount to format
  * @returns Formatted Rupiah string
  */
-export function formatRupiah(amount: number): string {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+export const formatRupiah = (amount: number): string => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,  // TANPA angka di belakang koma
+    maximumFractionDigits: 0,  // TANPA angka di belakang koma
+  }).format(Math.round(amount)); // Round untuk bilangan bulat
+};
 
 /**
  * Truncate text to specified length
