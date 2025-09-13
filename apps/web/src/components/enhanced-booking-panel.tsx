@@ -93,12 +93,6 @@ function buildFarePayload(
     finalFareCurrency,
     farePerKm: fareResult.farePerKm,
     additionalKm: fareResult.additionalKm,
-    
-    // // ✅ Keep cents for backward compatibility tapi dengan nama yang jelas
-    // baseCents: baseRupiah, // Actually rupiah, not cents
-    // distanceCents: distanceRupiah, // Actually rupiah, not cents
-    // airportCents: airportRupiah, // Actually rupiah, not cents
-    // totalCents: totalRupiah, // Actually rupiah, not cents
   };
 }
 
@@ -127,8 +121,8 @@ export default function EnhancedBookingPanel({
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
   // Dialog states
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [showActionDialog, setShowActionDialog] = useState(false);
+  const [showBookingDialog, setShowBookingDialog] = useState(false);
+  const [isBookingInProgress, setIsBookingInProgress] = useState(false);
   const [driverMessageSent, setDriverMessageSent] = useState(false);
   const [customerMessageSent, setCustomerMessageSent] = useState(false);
   const [lastOrderData, setLastOrderData] = useState<any>(null);
@@ -776,11 +770,9 @@ Semoga perjalanan lancar!
   };
 
   // Booking Functions
-  const handleBookRideClick = () => {
-    setShowConfirmDialog(true);
-  };
-
-  const handleConfirmBooking = async () => {
+  const handleBookRideClick = async () => {
+    setIsBookingInProgress(true);
+    
     try {
       const pickupLocation = selectedPickup ? { lat: selectedPickup.lat, lng: selectedPickup.lng } : currentLocation;
 
@@ -788,6 +780,7 @@ Semoga perjalanan lancar!
         toast.error("Data tidak lengkap", {
           description: "Pastikan semua data sudah terisi dengan benar",
         });
+        setIsBookingInProgress(false);
         return;
       }
 
@@ -796,6 +789,7 @@ Semoga perjalanan lancar!
         toast.error("Error Kalkulasi Jarak", {
           description: "Jarak perjalanan tidak valid. Silakan pilih ulang lokasi.",
         });
+        setIsBookingInProgress(false);
         return;
       }
 
@@ -810,6 +804,7 @@ Semoga perjalanan lancar!
         toast.error("Error Kalkulasi Tarif", {
           description: "Terjadi kesalahan saat menghitung tarif. Silakan coba lagi.",
         });
+        setIsBookingInProgress(false);
         return;
       }
 
@@ -818,6 +813,7 @@ Semoga perjalanan lancar!
         toast.error("Nomor HP Tidak Valid", {
           description: "Nomor HP harus antara 10-15 digit",
         });
+        setIsBookingInProgress(false);
         return;
       }
 
@@ -907,9 +903,7 @@ Semoga perjalanan lancar!
         cleanedPhone: cleanedPhone
       });
       
-      setShowConfirmDialog(false);
-      setShowActionDialog(true);
-
+      setShowBookingDialog(true);
     } catch (error) {
       console.error("Error creating order:", error);
       
@@ -920,6 +914,8 @@ Semoga perjalanan lancar!
         description: error instanceof Error ? error.message : "Silakan coba lagi",
         duration: 5000,
       });
+    } finally {
+      setIsBookingInProgress(false);
     }
   };
 
@@ -951,7 +947,7 @@ Semoga perjalanan lancar!
   };
 
   const resetForm = () => {
-    setShowActionDialog(false);
+    setShowBookingDialog(false);
     setPassengerName("");
     setPassengerPhone("");
     setSelectedDriverId(null);
@@ -966,7 +962,8 @@ Semoga perjalanan lancar!
     !currentLocation ||
     isCalculatingRoute ||
     passengerName.trim() === "" ||
-    passengerPhone.trim() === "";
+    passengerPhone.trim() === "" ||
+    isBookingInProgress;
 
   return (
     <>
@@ -1236,143 +1233,111 @@ Semoga perjalanan lancar!
             onClick={handleBookRideClick}
             data-testid="button-book-ride"
           >
-            {isCalculatingRoute
-              ? "Calculating route..."
-              : selectedDestination && currentLocation && fareEstimate
-                ? `Book ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name} ${formatCurrency(getVehiclePrice(fareEstimate.totalFare, selectedVehicleType))}`
-                : !currentLocation
-                  ? "Getting your location..."
-                  : "Choose destination to book"
+            {isBookingInProgress
+              ? "Memproses pesanan..."
+              : isCalculatingRoute
+                ? "Calculating route..."
+                : selectedDestination && currentLocation && fareEstimate
+                  ? `Book ${VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name} ${formatCurrency(getVehiclePrice(fareEstimate.totalFare, selectedVehicleType))}`
+                  : !currentLocation
+                    ? "Getting your location..."
+                    : "Choose destination to book"
             }
           </Button>
         </ScrollArea>
       </div>
 
-      {/* Confirmation Dialog */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+      {/* Booking Confirmation & Action Dialog */}
+      <AlertDialog open={showBookingDialog} onOpenChange={setShowBookingDialog}>
         <AlertDialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
           <AlertDialogHeader>
             <div className="flex justify-between items-center">
-              <AlertDialogTitle className="flex items-center">
-                <MessageCircle className="h-5 w-5 mr-2 text-green-600" />
-                Konfirmasi Pesanan
+              <AlertDialogTitle className="flex items-center text-green-600">
+                <Check className="h-5 w-5 mr-2" />
+                Order Berhasil Dibuat!
               </AlertDialogTitle>
-              {/* <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDownloadReceipt}
-                className="h-8 px-2"
-              >
-                <Download className="h-4 w-4 mr-1" />
-                Download
-              </Button> */}
             </div>
-            <AlertDialogDescription className="text-left space-y-3">
-              {/* Header with Date and Time */}
-              <div className="flex justify-between items-center text-xs text-gray-500 border-b pb-2">
-                <span>{new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-                <div className="text-center">
-                  <p className="font-bold text-sm text-gray-900">KOPSI PEKANBARU</p>
-                </div>
-                <span>{new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</span>
-              </div>
-
-              {/* Detail Perjalanan */}
-              <div className="bg-gray-50 rounded-lg p-3">
-                <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Perjalanan :</h4>
-                <div className="space-y-1 text-xs">
-                  <p><strong>Dari :</strong> {selectedPickup?.display_name || selectedPickup?.name || "Lokasi Saat Ini"}</p>
-                  <p><strong>Tujuan :</strong> {selectedDestination?.display_name ?? selectedDestination?.name}</p>
-                </div>
-              </div>
-
-              {/* Detail Penumpang */}
-              <div className="bg-gray-50 rounded-lg p-3">
-                <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Penumpang :</h4>
-                <div className="space-y-1 text-xs">
-                  <div className="flex justify-between">
-                    <strong>Nama Penumpang</strong>
-                    <strong>{passengerName}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <strong>Nomor Handphone</strong>
-                    <strong>{passengerPhone}</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Detail Tarif */}
-              {fareEstimate && (
-                <div className="bg-gray-50 rounded-lg p-3">
-                  <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Tarif :</h4>
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between ml-auto w-1/2 border-t pt-1">
-                      <strong>Subtotal</strong>
-                      <strong>Rp {fareEstimate.additionalFare.toLocaleString()}</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <strong>Airport Charge</strong>
-                      <span>Rp {(fareEstimate.airportFare || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between ml-auto w-1/2 border-t pt-1 font-semibold">
-                      <strong>TOTAL</strong>
-                      <strong>Rp {getVehiclePrice(fareEstimate.totalFare, selectedVehicleType).toLocaleString()}</strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Additional Info */}
-              {selectedDriverId && (
-                <div className="bg-blue-50 rounded-lg p-3">
-                  <h4 className="font-semibold text-sm text-gray-900 mb-1">Driver yang Dipilih :</h4>
-                  <p className="text-xs">
-                    <strong>{availableDrivers.find(d => d.id === selectedDriverId)?.name}</strong> - {availableDrivers.find(d => d.id === selectedDriverId)?.plate}
-                  </p>
-                </div>
-              )}
-
-              <div className="bg-yellow-50 rounded-lg p-3">
-                <p className="text-xs text-gray-600 italic">
-                  <strong>Catatan:</strong> Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.
-                </p>
-              </div>
-
-              <p className="text-gray-600 text-xs text-center border-t pt-2">
-                Pesanan akan dibuat dan Anda dapat mengirim konfirmasi via WhatsApp.
-              </p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Batal</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleConfirmBooking}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <Check className="h-4 w-4 mr-2" />
-              Buat Pesanan
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Action Dialog - REORDERED: Driver First, then Customer */}
-      <AlertDialog open={showActionDialog} onOpenChange={setShowActionDialog}>
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center text-green-600">
-              <Check className="h-5 w-5 mr-2" />
-              Order Berhasil Dibuat!
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogDescription className="text-left">
               Order #{lastOrderData?.orderResult?.orderNumber} telah tercatat di sistem.
-              <br />
-              Pilih tindakan selanjutnya:
             </AlertDialogDescription>
           </AlertDialogHeader>
           
-          <div className="space-y-3 py-4">
-          {/* Download Receipt Option */}
+          {/* Order Details Section */}
+          <div className="space-y-4 mb-4">
+            {/* Header with Date and Time */}
+            <div className="flex justify-between items-center text-xs text-gray-500 border-b pb-2">
+              <span>{new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              <div className="text-center">
+                <p className="font-bold text-sm text-gray-900">KOPSI PEKANBARU</p>
+              </div>
+              <span>{new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</span>
+            </div>
+
+            {/* Detail Perjalanan */}
+            <div className="bg-gray-50 rounded-lg p-3">
+              <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Perjalanan :</h4>
+              <div className="space-y-1 text-xs">
+                <p><strong>Dari :</strong> {selectedPickup?.display_name || selectedPickup?.name || "Lokasi Saat Ini"}</p>
+                <p><strong>Tujuan :</strong> {selectedDestination?.display_name ?? selectedDestination?.name}</p>
+              </div>
+            </div>
+
+            {/* Detail Penumpang */}
+            <div className="bg-gray-50 rounded-lg p-3">
+              <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Penumpang :</h4>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between">
+                  <strong>Nama Penumpang</strong>
+                  <strong>{passengerName}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <strong>Nomor Handphone</strong>
+                  <strong>{passengerPhone}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Detail Tarif */}
+            {fareEstimate && (
+              <div className="bg-gray-50 rounded-lg p-3">
+                <h4 className="font-semibold text-sm text-gray-900 mb-2">Detail Tarif :</h4>
+                <div className="space-y-1 text-xs">
+                  <div className="flex justify-between ml-auto w-1/2 border-t pt-1">
+                    <strong>Subtotal</strong>
+                    <strong>Rp {fareEstimate.additionalFare.toLocaleString()}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <strong>Airport Charge</strong>
+                    <span>Rp {(fareEstimate.airportFare || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between ml-auto w-1/2 border-t pt-1 font-semibold">
+                    <strong>TOTAL</strong>
+                    <strong>Rp {getVehiclePrice(fareEstimate.totalFare, selectedVehicleType).toLocaleString()}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Additional Info */}
+            {lastOrderData?.driver && (
+              <div className="bg-blue-50 rounded-lg p-3">
+                <h4 className="font-semibold text-sm text-gray-900 mb-1">Driver yang Ditugaskan :</h4>
+                <p className="text-xs">
+                  <strong>{lastOrderData.driver.name}</strong> - {lastOrderData.driver.plate}
+                </p>
+              </div>
+            )}
+
+            <div className="bg-yellow-50 rounded-lg p-3">
+              <p className="text-xs text-gray-600 italic">
+                <strong>Catatan:</strong> Penumpang akan dibebankan biaya tunggu sebesar Rp 45.000 apabila singgah lebih dari 15 menit atau merubah tujuan perjalanan dalam kota Pekanbaru.
+              </p>
+            </div>
+          </div>
+          
+          {/* Action Buttons Section */}
+          <div className="space-y-3 py-2 border-t pt-4">
+            {/* Download Receipt Option */}
             <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
               <div className="flex-1">
                 <p className="font-medium text-sm">Download Receipt</p>
@@ -1387,6 +1352,7 @@ Semoga perjalanan lancar!
                 Download
               </Button>
             </div>
+            
             {/* Step 1: Send to Driver FIRST (if available) */}
             {lastOrderData?.driver && (
               <div className="flex items-center justify-between p-3 border rounded-lg">
@@ -1445,9 +1411,9 @@ Semoga perjalanan lancar!
           </div>
 
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={resetForm}>
-              Tutup
-            </AlertDialogCancel>
+            <AlertDialogAction onClick={resetForm}>
+              Tutup & Buat Order Baru
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
