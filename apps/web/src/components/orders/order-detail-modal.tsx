@@ -1,68 +1,21 @@
-"use client";
-
-import { format } from "date-fns";
-import { id } from "date-fns/locale";
+// File: components/orders/order-detail-modal.tsx
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { MapPin, Navigation, AlertCircle, Check, Coins, Clock, ArrowUp, ArrowDown, Wallet, Banknote } from "lucide-react";
-import { formatRupiah } from "@/lib/utils";
+import { format } from "date-fns";
+import { id } from "date-fns/locale";
 import { OrderStatus } from "@prisma/client";
-
-// Types
-interface Order {
-  id: string;
-  orderNumber: string;
-  status: OrderStatus;
-  passengerName: string;
-  pickupAddress: string;
-  dropoffAddress: string;
-  createdAt: string;
-  totalFare: string;
-  baseFare: string;
-  distanceFare: string;
-  airportFare?: string;
-  requestedVehicleType: string;
-  distanceMeters: number;
-  estimatedDurationMinutes: number;
-  operationalFeeCoins?: string;
-  operationalFeePercent?: number;
-  operationalFeeStatus?: string;
-  operationalFeeConfig?: any;
-  balanceBeforeOperationalFee?: string;
-  balanceAfterOperationalFee?: string;
-  operationalFeeTransactionId?: string;
-  driverNetEarnings?: string;
-  driver?: {
-    id: string;
-    name: string;
-    phone: string;
-  };
-  tripStartedAt?: string;
-  tripCompletedAt?: string;
-  driverAssignedAt?: string;
-  driverAcceptedAt?: string;
-  driverArrivedAt?: string;
-  cancelledAt?: string;
-  cancelledReason?: string;
-  paymentMethod?: string;
-}
+import { formatRupiah } from "@/lib/utils";
+import { MapPin, User, Car, CreditCard, Clock, Info, Receipt, CircleDollarSign } from "lucide-react";
 
 // Status badge color mapping
 const statusColorMap: Record<OrderStatus, string> = {
@@ -109,562 +62,466 @@ const formatStatus = (status: OrderStatus): string => {
   }
 };
 
-// Helper to format service fee status (renamed from operational fee)
-const formatServiceFeeStatus = (status?: string): string => {
-  switch (status) {
-    case "CHARGED":
-      return "Terbayar";
-    case "PENDING":
-      return "Menunggu";
-    case "FAILED":
-      return "Gagal";
-    case "NOT_APPLICABLE":
-      return "Tidak Berlaku";
-    default:
-      return status || "Tidak Ada";
+const extractPreferredDriver = (specialRequests: string | null | undefined) => {
+  if (!specialRequests || !specialRequests.includes("Preferred driver:")) {
+    return null;
   }
-};
-
-// Helper to get service fee status badge color
-const getServiceFeeStatusColor = (status?: string): string => {
-  switch (status) {
-    case "CHARGED":
-      return "bg-green-600";
-    case "PENDING":
-      return "bg-yellow-500";
-    case "FAILED":
-      return "bg-red-500";
-    case "NOT_APPLICABLE":
-      return "bg-gray-500";
-    default:
-      return "bg-gray-400";
-  }
-};
-
-// Payment method format
-const formatPaymentMethod = (method?: string): string => {
-  switch (method) {
-    case "CASH":
-      return "Tunai";
-    case "BANK_TRANSFER":
-      return "Transfer Bank";
-    case "QRIS":
-      return "QRIS";
-    case "EWALLET":
-      return "E-Wallet";
-    case "CREDIT_CARD":
-      return "Kartu Kredit";
-    case "DEBIT_CARD":
-      return "Kartu Debit";
-    case "COINS":
-      return "Koin";
-    default:
-      return method || "Tidak Diketahui";
-  }
-};
-
-// Helper to format coin balance
-const formatCoins = (amount?: string): string => {
-  if (!amount) return "0";
-  return new Intl.NumberFormat("id-ID").format(parseInt(amount));
-};
-
-// Helper to calculate driver net earnings
-const calculateDriverNetEarnings = (order: Order): string => {
+  
   try {
-    const totalFare = parseInt(order.totalFare) / 100;
-    const operationalFeeRupiah = order.operationalFeeCoins ? 
-      parseInt(order.operationalFeeCoins) : 0;
+    // Contoh format: Preferred driver: Jhon Kuntan (BM 1399 JU)
+    const driverText = specialRequests.split("Preferred driver:")[1].trim();
+    const driverName = driverText.split("(")[0].trim();
+    const plateNumber = driverText.match(/\(([^)]+)\)/)?.[1] || "";
     
-    const driverNetEarnings = totalFare - operationalFeeRupiah;
-    
-    // Format TANPA koma - bilangan bulat
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(Math.round(Math.max(0, driverNetEarnings)));
+    return {
+      name: driverName,
+      plateNumber: plateNumber
+    };
   } catch (error) {
-    return "Rp 0";
+    console.error("Error extracting preferred driver:", error);
+    return null;
   }
 };
-
-// Helper to calculate breakdown values
-const calculateEarningsBreakdown = (order: Order) => {
-  const totalFare = parseInt(order.totalFare) / 100;
-  const airportFare = order.airportFare ? parseInt(order.airportFare) / 100 : 0;
-  const baseFare = parseInt(order.baseFare) / 100;
-  const distanceFare = parseInt(order.distanceFare) / 100;
-  
-  // Calculate operational fee in Rupiah
-  let operationalFeeRupiah = 0;
-  if (order.operationalFeeCoins && order.operationalFeePercent) {
-    // Convert operational fee from coins to Rupiah (assuming 1 coin = 1 rupiah)
-    operationalFeeRupiah = parseInt(order.operationalFeeCoins);
-  }
-  
-  return {
-    totalFare,
-    airportFare,
-    baseFare,
-    distanceFare,
-    operationalFeeRupiah,
-    driverNetEarnings: Math.max(0, totalFare - operationalFeeRupiah), // Driver gets total fare minus operational fee
-    platformShare: operationalFeeRupiah, // Operational fee goes to platform
-  };
-};
-
 
 interface OrderDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
-  order: Order;
+  order: any; // Lebih baik gunakan type Order yang sudah didefinisikan
+  isObserver?: boolean; // Tambahkan prop untuk mode Observer
 }
 
-export function OrderDetailModal({ isOpen, onClose, order }: OrderDetailModalProps) {
-  // Format timestamp to readable date/time
-  const formatDateTime = (timestamp?: string) => {
-    if (!timestamp) return "-";
-    return format(new Date(timestamp), "dd MMM yyyy HH:mm", {
-      locale: id,
-    });
-  };
+export function OrderDetailModal({ isOpen, onClose, order, isObserver = false }: OrderDetailModalProps) {
+  const [activeTab, setActiveTab] = useState("details");
 
-  // Format vehicle type
-  const formatVehicleType = (type: string): string => {
-    switch (type) {
-      case "ECONOMY":
-        return "Ekonomi";
-      case "PREMIUM":
-        return "Premium";
-      case "LUXURY":
-        return "Luxury";
-      case "MOTORCYCLE":
-        return "Motor";
-      default:
-        return type;
+  const calculateDriverNetEarnings = (): string => {
+    try {
+      const totalFare = parseInt(order.totalFare) / 100;
+      const operationalFeeRupiah = order.operationalFeeCoins ? parseInt(order.operationalFeeCoins) : 0;
+      const driverNetEarnings = totalFare - operationalFeeRupiah;
+      
+      return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(Math.round(Math.max(0, driverNetEarnings)));
+    } catch (error) {
+      return "Rp 0";
     }
   };
-
-  // Format fee rule from service fee config
-  const getFeeRule = (): string => {
-    if (order.operationalFeeConfig?.feeRule) {
-      return order.operationalFeeConfig.feeRule;
-    }
-    
-    if (order.distanceMeters >= 1000 && order.distanceMeters <= 6000) {
-      return "7.5% (1-6km)";
-    } else if (order.distanceMeters > 6000) {
-      return "11% (>6km)";
-    } else {
-      return "5% (<1km)";
-    }
-  };
-
-  const earningsBreakdown = calculateEarningsBreakdown(order);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
-            <span>Detail Pesanan #{order.orderNumber}</span>
+            <span>Detail Pesanan {order.orderNumber}</span>
             <Badge
-              className={`${
-                statusColorMap[order.status as OrderStatus]
-              } text-white ml-2`}
+              className={`${statusColorMap?.[order.status as keyof typeof statusColorMap] ?? ''} text-white`}
             >
-              {formatStatus(order.status as OrderStatus)}
+              {formatStatus(order.status)}
             </Badge>
           </DialogTitle>
           <DialogDescription>
-            {formatDateTime(order.createdAt)}
+            Tanggal: {format(new Date(order.createdAt), "dd MMMM yyyy, HH:mm", { locale: id })}
+            
+            {/* Observer Badge */}
+            {isObserver && (
+              <Badge variant="outline" className="ml-2 bg-blue-100 text-blue-800 border-blue-300">
+                Observer Mode
+              </Badge>
+            )}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column - Trip Information */}
-          <div className="lg:col-span-2">
-            <h3 className="text-lg font-semibold mb-2">Informasi Perjalanan</h3>
-            
-            <div className="space-y-4">
-              <div className="space-y-2">
+        <Tabs defaultValue="details" value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="details">Detail Pesanan</TabsTrigger>
+            <TabsTrigger value="payment">Pembayaran</TabsTrigger>
+            <TabsTrigger value="driver">Informasi Driver</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="details" className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
                 <div className="flex items-start">
-                  <MapPin className="h-5 w-5 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
+                  <MapPin className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
                   <div>
-                    <div className="text-sm text-muted-foreground">Lokasi Jemput</div>
-                    <div>{order.pickupAddress}</div>
+                    <p className="text-sm text-muted-foreground">Lokasi Jemput</p>
+                    <p className="font-medium">{order.pickupAddress}</p>
+                    {order.pickupLat && order.pickupLng && (
+                      <p className="text-xs text-muted-foreground">
+                        {order.pickupLat.toFixed(6)}, {order.pickupLng.toFixed(6)}
+                      </p>
+                    )}
                   </div>
                 </div>
-              </div>
-              
-              <div className="space-y-2">
+
                 <div className="flex items-start">
-                  <Navigation className="h-5 w-5 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
+                  <MapPin className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
                   <div>
-                    <div className="text-sm text-muted-foreground">Lokasi Tujuan</div>
-                    <div>{order.dropoffAddress}</div>
+                    <p className="text-sm text-muted-foreground">Lokasi Tujuan</p>
+                    <p className="font-medium">{order.dropoffAddress}</p>
+                    {order.dropoffLat && order.dropoffLng && (
+                      <p className="text-xs text-muted-foreground">
+                        {order.dropoffLat.toFixed(6)}, {order.dropoffLng.toFixed(6)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-start">
+                  <User className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Penumpang</p>
+                    <p className="font-medium">{order.passengerName}</p>
+                    <p className="text-sm">{order.passengerPhone}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-sm text-muted-foreground">Jarak</div>
-                  <div>{(order.distanceMeters / 1000).toFixed(1)} km</div>
+              <div className="space-y-3">
+                <div className="flex items-start">
+                  <Car className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Tipe Kendaraan</p>
+                    <p className="font-medium">
+                      {order.requestedVehicleType === "ECONOMY"
+                        ? "Ekonomi"
+                        : order.requestedVehicleType === "PREMIUM"
+                        ? "Premium"
+                        : order.requestedVehicleType === "LUXURY"
+                        ? "Luxury"
+                        : order.requestedVehicleType === "MOTORCYCLE"
+                        ? "Motor"
+                        : order.requestedVehicleType}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm text-muted-foreground">Estimasi Waktu</div>
-                  <div>{order.estimatedDurationMinutes} menit</div>
+
+                <div className="flex items-start">
+                  <Clock className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Estimasi Perjalanan</p>
+                    <p className="font-medium">
+                      {(order.distanceMeters / 1000).toFixed(1)} km • {order.estimatedDurationMinutes} menit
+                    </p>
+                  </div>
                 </div>
-              </div>
-              
-              <div>
-                <div className="text-sm text-muted-foreground">Tipe Kendaraan</div>
-                <div>{formatVehicleType(order.requestedVehicleType)}</div>
-              </div>
-              
-              <div>
-                <div className="text-sm text-muted-foreground">Penumpang</div>
-                <div>{order.passengerName}</div>
-              </div>
-              
-              <div>
-                <div className="text-sm text-muted-foreground">Metode Pembayaran</div>
-                <div>{formatPaymentMethod(order.paymentMethod)}</div>
+
+                <div className="flex items-start">
+                  <Info className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Permintaan Khusus</p>
+                    <p className="font-medium">
+                      {order.specialRequests || "Tidak ada permintaan khusus"}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {order.driver && (
-              <>
-                <h3 className="text-lg font-semibold mt-6 mb-2">Informasi Driver</h3>
+            {/* Status Timeline (contoh saja) */}
+            {order.statusHistory && order.statusHistory.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-sm font-medium mb-2">Riwayat Status</h3>
                 <div className="space-y-2">
-                  <div>
-                    <div className="text-sm text-muted-foreground">Nama Driver</div>
-                    <div>{order.driver.name}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground">Telepon Driver</div>
-                    <div>{order.driver.phone}</div>
-                  </div>
+                  {order.statusHistory.map((history: any, index: number) => (
+                    <div key={index} className="flex items-center">
+                      <div className="flex flex-col items-center mr-2">
+                        <div className="h-3 w-3 rounded-full bg-green-500" />
+                        {index < order.statusHistory.length - 1 && (
+                          <div className="h-10 w-0.5 bg-primary/30" />
+                        )}
+                      </div>
+                      <div className="mb-2">
+                        <p className="font-medium">
+                          {formatStatus(history.toStatus)}
+                        </p>
+                        {history.reason && (
+                          <p className="text-sm">{history.reason}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </>
+              </div>
             )}
+          </TabsContent>
 
-            {/* Status Timeline */}
-            <h3 className="text-lg font-semibold mt-6 mb-2">Status Timeline</h3>
-            <div className="space-y-3">
+          <TabsContent value="payment" className="space-y-4 pt-4">
+            <div className="space-y-4">
               <div className="flex items-start">
-                <div className="bg-blue-100 p-1 rounded-full mr-2">
-                  <Clock className="h-4 w-4 text-blue-600" />
-                </div>
+                <CreditCard className="h-5 w-5 text-muted-foreground mr-2 mt-0.5" />
                 <div>
-                  <div className="font-medium">Pesanan Dibuat</div>
-                  <div className="text-sm text-muted-foreground">
-                    {formatDateTime(order.createdAt)}
+                  <p className="text-sm text-muted-foreground">Metode Pembayaran</p>
+                  <p className="font-medium">
+                    {order.paymentMethod === "CASH"
+                      ? "Tunai"
+                      : order.paymentMethod === "TRANSFER"
+                      ? "Transfer Bank"
+                      : order.paymentMethod === "EMONEY"
+                      ? "E-Money"
+                      : order.paymentMethod || "Tunai"}
+                  </p>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div>
+                <h3 className="text-sm font-medium mb-2">Rincian Biaya</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Biaya Dasar</span>
+                    <span>{formatRupiah(parseInt(order.baseFare) / 100)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Biaya Jarak</span>
+                    <span>{formatRupiah(parseInt(order.distanceFare) / 100)}</span>
+                  </div>
+                  {order.airportFare && parseInt(order.airportFare) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Biaya Bandara</span>
+                      <span>{formatRupiah(parseInt(order.airportFare) / 100)}</span>
+                    </div>
+                  )}
+                  <Separator />
+                  <div className="flex justify-between font-medium">
+                    <span>Total</span>
+                    <span>{formatRupiah(parseInt(order.totalFare) / 100)}</span>
                   </div>
                 </div>
               </div>
-              
-              {order.driverAssignedAt && (
-                <div className="flex items-start">
-                  <div className="bg-blue-100 p-1 rounded-full mr-2">
-                    <Clock className="h-4 w-4 text-blue-600" />
+
+              <Separator />
+
+              {/* Biaya Layanan (Operational Fee) */}
+              <div>
+                <h3 className="text-sm font-medium mb-2 flex items-center">
+                  <Receipt className="h-4 w-4 mr-1" />
+                  Biaya Layanan
+                </h3>
+                <div className="bg-slate-50 p-3 rounded-md">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm">Status</span>
+                    <Badge
+                      className={`${
+                        order.operationalFeeStatus === "CHARGED"
+                          ? "bg-green-600"
+                          : order.operationalFeeStatus === "PENDING"
+                          ? "bg-yellow-500"
+                          : order.operationalFeeStatus === "FAILED"
+                          ? "bg-red-500"
+                          : "bg-gray-500"
+                      } text-white`}
+                    >
+                      {order.operationalFeeStatus === "CHARGED"
+                        ? "Terbayar"
+                        : order.operationalFeeStatus === "PENDING"
+                        ? "Menunggu"
+                        : order.operationalFeeStatus === "FAILED"
+                        ? "Gagal"
+                        : order.operationalFeeStatus || "Tidak Berlaku"}
+                    </Badge>
                   </div>
-                  <div>
-                    <div className="font-medium">Driver Ditugaskan</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDateTime(order.driverAssignedAt)}
+                  {order.operationalFeeCoins && (
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Jumlah</span>
+                      <span>{order.operationalFeeCoins} coins</span>
                     </div>
-                  </div>
+                  )}
+                  {order.operationalFeePercent && (
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Persentase</span>
+                      <span>{(order.operationalFeePercent * 100).toFixed(1)}%</span>
+                    </div>
+                  )}
+                  {order.balanceBeforeOperationalFee && (
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Saldo Sebelum</span>
+                      <span>{order.balanceBeforeOperationalFee} coins</span>
+                    </div>
+                  )}
+                  {order.balanceAfterOperationalFee && (
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Saldo Setelah</span>
+                      <span>{order.balanceAfterOperationalFee} coins</span>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
               
-              {order.driverAcceptedAt && (
-                <div className="flex items-start">
-                  <div className="bg-blue-100 p-1 rounded-full mr-2">
-                    <Clock className="h-4 w-4 text-blue-600" />
+              {/* Driver Net Earnings */}
+              <div>
+                <h3 className="text-sm font-medium mb-2 flex items-center">
+                  <CircleDollarSign className="h-4 w-4 mr-1" />
+                  Pendapatan Driver (Netto)
+                </h3>
+                <div className="bg-green-50 p-3 rounded-md">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">Total Pendapatan</span>
+                    <span className="font-medium text-green-700">{calculateDriverNetEarnings()}</span>
                   </div>
-                  <div>
-                    <div className="font-medium">Driver Menerima</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDateTime(order.driverAcceptedAt)}
-                    </div>
-                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    *Pendapatan bersih setelah dipotong biaya layanan
+                  </p>
                 </div>
-              )}
-              
-              {order.driverArrivedAt && (
-                <div className="flex items-start">
-                  <div className="bg-blue-100 p-1 rounded-full mr-2">
-                    <Clock className="h-4 w-4 text-blue-600" />
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="driver" className="space-y-4 pt-4">
+            {order.driver ? (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-4">
+                  <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center">
+                    {order.driver.avatarUrl ? (
+                      <img
+                        src={order.driver.avatarUrl}
+                        alt={order.driver.name}
+                        className="h-12 w-12 rounded-full object-cover"
+                      />
+                    ) : (
+                      <User className="h-6 w-6 text-slate-500" />
+                    )}
                   </div>
                   <div>
-                    <div className="font-medium">Driver Tiba</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDateTime(order.driverArrivedAt)}
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {order.tripStartedAt && (
-                <div className="flex items-start">
-                  <div className="bg-blue-100 p-1 rounded-full mr-2">
-                    <Clock className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <div>
-                    <div className="font-medium">Perjalanan Dimulai</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDateTime(order.tripStartedAt)}
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {order.tripCompletedAt && (
-                <div className="flex items-start">
-                  <div className="bg-green-100 p-1 rounded-full mr-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                  </div>
-                  <div>
-                    <div className="font-medium">Perjalanan Selesai</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDateTime(order.tripCompletedAt)}
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {order.cancelledAt && (
-                <div className="flex items-start">
-                  <div className="bg-red-100 p-1 rounded-full mr-2">
-                    <AlertCircle className="h-4 w-4 text-red-600" />
-                  </div>
-                  <div>
-                    <div className="font-medium">Pesanan Dibatalkan</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatDateTime(order.cancelledAt)}
-                    </div>
-                    {order.cancelledReason && (
-                      <div className="text-sm text-red-600 mt-1">
-                        Alasan: {order.cancelledReason}
-                      </div>
+                    <p className="font-medium">{order.driver.name}</p>
+                    <p className="text-sm text-muted-foreground">{order.driver.phone}</p>
+                    {order.driver.email && (
+                      <p className="text-sm text-muted-foreground">{order.driver.email}</p>
                     )}
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Right column - Financial Information */}
-          <div>
-            {/* Fare Breakdown */}
-            <h3 className="text-lg font-semibold mb-2">Rincian Biaya</h3>
-            
-            <Table>
-              <TableBody>
-                <TableRow>
-                  <TableCell>Tarif Dasar</TableCell>
-                  <TableCell className="text-right">
-                    {formatRupiah(earningsBreakdown.baseFare)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Tarif Jarak</TableCell>
-                  <TableCell className="text-right">
-                    {formatRupiah(earningsBreakdown.distanceFare)}
-                  </TableCell>
-                </TableRow>
-                {earningsBreakdown.airportFare > 0 && (
-                  <TableRow>
-                    <TableCell>Tarif Bandara</TableCell>
-                    <TableCell className="text-right">
-                      {formatRupiah(earningsBreakdown.airportFare)}
-                    </TableCell>
-                  </TableRow>
+                {order.driver.driverProfile && (
+                  <>
+                    <div className="flex items-center space-x-2">
+                      <Badge variant="outline">
+                        Rating: {order.driver.driverProfile.rating || "N/A"}
+                      </Badge>
+                      <Badge variant="outline">
+                        Status: {order.driver.driverProfile.driverStatus || "N/A"}
+                      </Badge>
+                    </div>
+
+                    {/* Observer-specific info */}
+                    {isObserver && (
+                      <div className="bg-blue-50 p-3 rounded-md space-y-2">
+                        <h4 className="text-sm font-medium text-blue-800">Informasi Observer</h4>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-blue-700">ID Driver</span>
+                          <span className="text-sm font-medium">{order.driver.id}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-blue-700">Lokasi Terakhir</span>
+                          <span className="text-sm font-medium">
+                            {order.driver.driverProfile.currentLat && order.driver.driverProfile.currentLng
+                              ? `${order.driver.driverProfile.currentLat.toFixed(6)}, ${order.driver.driverProfile.currentLng.toFixed(6)}`
+                              : "Tidak tersedia"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-blue-700">Total Perjalanan</span>
+                          <span className="text-sm font-medium">
+                            {order.driver.driverProfile.totalTrips || "0"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-blue-700">Perjalanan Selesai</span>
+                          <span className="text-sm font-medium">
+                            {order.driver.driverProfile.completedTrips || "0"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
-                <TableRow className="font-medium">
-                  <TableCell>Total Tarif</TableCell>
-                  <TableCell className="text-right">
-                    {formatRupiah(earningsBreakdown.totalFare)}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
 
-            {/* Driver Earnings Section */}
-            <h3 className="text-lg font-semibold mt-6 mb-2">Pendapatan Driver</h3>
-            
-            <div className="rounded-md border p-4 space-y-3">
-  <div className="flex justify-between items-center">
-    <div className="flex items-center">
-      <Banknote className="h-5 w-5 mr-2 text-green-600" />
-      <span>Netto</span>
-    </div>
-    <div className="font-bold text-green-700 text-lg">
-      {formatRupiah(earningsBreakdown.driverNetEarnings)}
-    </div>
-  </div>
-  
-  <Separator />
-  
-  <div className="space-y-2 text-sm">
-    <div className="flex justify-between">
-      <span>Total Tarif</span>
-      <span>{formatRupiah(earningsBreakdown.totalFare)}</span>
-    </div>
-    
-    {earningsBreakdown.operationalFeeRupiah > 0 && (
-      <div className="flex justify-between text-red-600">
-        <span>Biaya Layanan Platform</span>
-        <span>-{formatRupiah(earningsBreakdown.operationalFeeRupiah)}</span>
-      </div>
-    )}
-    
-    <Separator />
-    
-    <div className="flex justify-between font-medium text-green-700">
-      <span>Yang Diterima Driver</span>
-      <span>{formatRupiah(earningsBreakdown.driverNetEarnings)}</span>
-    </div>
-  </div>
-  
-  {earningsBreakdown.operationalFeeRupiah > 0 && (
-    <div className="bg-blue-50 p-2 rounded-md">
-      <div className="text-xs text-blue-600">
-        <strong>Catatan:</strong> Biaya layanan platform digunakan untuk operasional sistem dan tidak diberikan kepada driver. Cas bandara (jika ada) dibebankan langsung ke penumpang.
-      </div>
-    </div>
-  )}
-</div>
-
-            {/* Service Fee Section */}
-            <h3 className="text-lg font-semibold mt-6 mb-2">Biaya Layanan</h3>
-            
-            <div className="rounded-md border p-4 space-y-3">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center">
-                  <Coins className="h-5 w-5 mr-2 text-blue-600" />
-                  <span>Status Pembayaran</span>
-                </div>
-                <Badge
-                  className={`${getServiceFeeStatusColor(order.operationalFeeStatus)} text-white`}
-                >
-                  {formatServiceFeeStatus(order.operationalFeeStatus)}
-                </Badge>
-              </div>
-              
-              {order.operationalFeeCoins && parseInt(order.operationalFeeCoins) > 0 ? (
-                <>
-                  <Separator />
-                  
-                  <div className="grid grid-cols-1 gap-3">
-                    <div>
-                      <div className="text-sm text-muted-foreground">Jumlah Biaya Layanan</div>
-                      <div className="font-medium text-lg">
-                        {formatCoins(order.operationalFeeCoins)} coins
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-muted-foreground">Persentase</div>
-                      <div className="font-medium">
-                        {order.operationalFeePercent
-                          ? `${(order.operationalFeePercent * 100).toFixed(1)}%`
-                          : "-"}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <Separator />
-
-                  {/* Balance Information */}
-                  <div className="space-y-3">
-                    <h4 className="font-medium text-sm">Informasi Saldo</h4>
-                    
-                    {order.balanceBeforeOperationalFee && (
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center">
-                          <ArrowUp className="h-4 w-4 text-gray-600 mr-2" />
-                          <span className="text-sm">Saldo Sebelum</span>
-                        </div>
-                        <div className="font-medium">
-                          {formatCoins(order.balanceBeforeOperationalFee)} coins
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div className="flex items-center justify-between text-red-600">
-                      <div className="flex items-center">
-                        <ArrowDown className="h-4 w-4 mr-2" />
-                        <span className="text-sm">Pengurangan</span>
-                      </div>
-                      <div className="font-medium">
-                        -{formatCoins(order.operationalFeeCoins)} coins
-                      </div>
-                    </div>
-                    
-                    {order.balanceAfterOperationalFee && (
-                      <div className="flex items-center justify-between border-t pt-2">
-                        <div className="flex items-center">
-                          <Coins className="h-4 w-4 text-green-600 mr-2" />
-                          <span className="text-sm font-medium">Saldo Setelah</span>
-                        </div>
-                        <div className="font-bold text-green-600">
-                          {formatCoins(order.balanceAfterOperationalFee)} coins
-                        </div>
-                      </div>
-                    )}
-                    
-                    {order.operationalFeeTransactionId && (
-                      <div className="text-xs text-muted-foreground">
-                        ID Transaksi: {order.operationalFeeTransactionId}
-                      </div>
-                    )}
-                  </div>
-
-                  <Separator />
-                  
+                {order.fleet && (
                   <div>
-                    <div className="text-sm text-muted-foreground">Perhitungan Biaya</div>
-                    <div className="text-sm">
-                      Berdasarkan {getFeeRule()} untuk jarak {(order.distanceMeters / 1000).toFixed(1)} km
+                    <h3 className="text-sm font-medium mb-2">Kendaraan</h3>
+                    <div className="bg-slate-50 p-3 rounded-md space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">Plat Nomor</span>
+                        <span className="font-medium">{order.fleet.plateNumber}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">Kendaraan</span>
+                        <span>
+                          {order.fleet.brand} {order.fleet.model} ({order.fleet.color})
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">Tipe</span>
+                        <span>{order.fleet.vehicleType}</span>
+                      </div>
+                      
+                      {/* Observer-specific info */}
+                      {isObserver && (
+                        <>
+                          <div className="flex justify-between">
+                            <span className="text-sm text-muted-foreground">ID Kendaraan</span>
+                            <span className="text-sm">{order.fleet.id}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-sm text-muted-foreground">Status</span>
+                            <span className="text-sm">{order.fleet.status || "ACTIVE"}</span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
-                  
-                  {order.operationalFeeStatus === "FAILED" && (
-                    <div className="bg-red-50 p-2 rounded-md flex items-start">
-                      <AlertCircle className="h-4 w-4 text-red-600 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-red-600">
-                        Gagal memproses biaya layanan. Silakan hubungi layanan pelanggan.
+                )}
+              </div>
+            ) : (
+              <div>
+                {/* Tampilkan info driver preferensi jika ada */}
+                {extractPreferredDriver(order.specialRequests) ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-4">
+                      <div className="h-12 w-12 rounded-full bg-slate-200 flex items-center justify-center">
+                        <User className="h-6 w-6 text-slate-500" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{extractPreferredDriver(order.specialRequests)?.name}</p>
+                        <p className="text-sm text-blue-600 font-medium">Driver Preferensi</p>
                       </div>
                     </div>
-                  )}
-                  
-                  {order.operationalFeeStatus === "CHARGED" && (
-                    <div className="bg-green-50 p-2 rounded-md flex items-start">
-                      <Check className="h-4 w-4 text-green-600 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm text-green-600">
-                        Biaya layanan berhasil diproses
+                    
+                    <div>
+                      <h3 className="text-sm font-medium mb-2">Kendaraan</h3>
+                      <div className="bg-slate-50 p-3 rounded-md">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-muted-foreground">Plat Nomor</span>
+                          <span className="font-medium">{extractPreferredDriver(order.specialRequests)?.plateNumber}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-2">
+                          <p>Informasi kendaraan ini berdasarkan preferensi penumpang.</p>
+                          <p>Status: Tidak ditugaskan secara resmi.</p>
+                        </div>
                       </div>
                     </div>
-                  )}
-                </>
-              ) : (
-                <div className="text-muted-foreground text-sm">
-                  {order.operationalFeeStatus === "NOT_APPLICABLE" 
-                    ? "Tidak ada biaya layanan untuk pesanan ini"
-                    : "Informasi biaya layanan tidak tersedia"}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <Car className="h-10 w-10 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-muted-foreground font-medium">
+                      Belum ada driver yang ditugaskan
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
 
-        <DialogFooter>
-          <Button onClick={onClose}>Tutup</Button>
-        </DialogFooter>
+        <div className="flex justify-end">
+          <Button variant="outline" onClick={onClose}>
+            Tutup
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

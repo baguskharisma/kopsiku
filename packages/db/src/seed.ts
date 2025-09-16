@@ -76,7 +76,8 @@ async function createUserInteractive() {
       { title: 'ADMIN', value: Role.ADMIN },
       { title: 'DRIVER', value: Role.DRIVER },
       { title: 'CUSTOMER', value: Role.CUSTOMER },
-    ], initial: 3 },
+      { title: 'OBSERVER', value: Role.OBSERVER },
+    ], initial: 4 },
     { name: 'isActive', type: 'confirm', message: 'isActive?', initial: true },
     { name: 'isVerified', type: 'confirm', message: 'isVerified?', initial: false },
   ]);

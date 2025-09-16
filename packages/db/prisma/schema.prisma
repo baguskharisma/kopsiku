@@ -16,6 +16,7 @@ enum Role {
   ADMIN
   DRIVER
   CUSTOMER
+  OBSERVER
 }
 
 enum FleetType {
@@ -175,6 +176,13 @@ model DriverProfile {
   emergencyContact  String                @map("emergency_contact")
   bankAccount       String?               @map("bank_account")
   bankName          String?               @map("bank_name")
+
+  // QR Code for Bank Account - NEW FIELD
+  qrImageUrl        String?               @map("qr_image_url") // URL/path to QR code image containing bank account details
+  qrImageUploadedAt DateTime?             @map("qr_image_uploaded_at") // Timestamp when QR was uploaded
+  qrImageVerified   Boolean               @default(false) @map("qr_image_verified") // Whether QR has been verified by admin
+  qrImageVerifiedBy String?               @map("qr_image_verified_by") // Admin ID who verified the QR
+  qrImageVerifiedAt DateTime?             @map("qr_image_verified_at") // When QR was verified
   
   // Verification
   isVerified        Boolean               @default(false) @map("is_verified")

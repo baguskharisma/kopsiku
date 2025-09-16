@@ -43,6 +43,8 @@ interface FindAllFilters {
   dateTo?: string;
   page?: number;
   limit?: number;
+  plateNumber?: string;
+  driverName?: string;
 }
 
 interface PaginatedResponse<T> {
@@ -1731,9 +1733,33 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
 
   // Update method findAll untuk include balance information
   async findAll(filters: FindAllFilters): Promise<PaginatedResponse<any>> {
-    const { status, driverId, customerId, dateFrom, dateTo, page = 1, limit = 10 } = filters;
+    const { 
+      status, 
+      driverId, 
+      customerId, 
+      dateFrom, 
+      dateTo, 
+      page = 1, 
+      limit = 10,
+      plateNumber,
+      driverName
+    } = filters;
   
-    const where: Prisma.OrderWhereInput = {
+    // Debug log untuk melihat filter yang diterima
+    this.logger.log('Executing findAll with filters:', {
+      status,
+      driverId,
+      customerId,
+      dateFrom,
+      dateTo,
+      plateNumber,
+      driverName,
+      page,
+      limit
+    });
+  
+    // Base where clause
+    let where: Prisma.OrderWhereInput = {
       ...(status && { status }),
       ...(driverId && { driverId }),
       ...(customerId && { customerId }),
@@ -1745,81 +1771,177 @@ return Array.from(driverMap.values()).map(({ driver, assignments }) => {
       },
     };
   
-    const [orders, total] = await Promise.all([
-      this.prisma.order.findMany({
-        where,
-        include: {
-          fleet: true,
-          driver: {
-            select: {
-              id: true,
-              name: true,
-              phone: true,
-              driverProfile: {
-                select: {
-                  rating: true,
-                  driverStatus: true,
-                  currentLat: true,
-                  currentLng: true,
-                }
+    // Filter berdasarkan plat nomor atau nama driver
+    // PENTING: Gunakan array OR dari awal untuk menghindari masalah override
+    const orConditions: Prisma.OrderWhereInput[] = [];
+  
+    // Filter berdasarkan plat nomor
+    if (plateNumber) {
+      orConditions.push(
+        // 1. Cari di fleet.plateNumber jika order sudah punya fleet
+        {
+          fleet: {
+            is: {
+              plateNumber: {
+                contains: plateNumber,
+                mode: 'insensitive'
               }
             }
-          },
-          customer: {
-            select: {
-              id: true,
-              name: true,
-              phone: true,
-            }
-          },
-          // Include coin transactions untuk balance information
-          coinTransactions: {
-            where: {
-              type: CoinTransactionType.OPERATIONAL_FEE,
-              status: CoinTransactionStatus.COMPLETED,
-            },
-            select: {
-              id: true,
-              balanceBefore: true,
-              balanceAfter: true,
-              amount: true,
-            },
-            take: 1,
           }
         },
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.order.count({ where }),
-    ]);
-  
-    // Transform orders dengan balance information dan driver earnings
-    const transformedOrders = orders.map(order => {
-      const transformedOrder = this.transformOrderResponse(order);
+        // 2. Cari di specialRequests jika berisi preferred driver dengan plat nomor
+        {
+          specialRequests: {
+            contains: plateNumber,
+            mode: 'insensitive'
+          }
+        }
+      );
       
-      // Add balance information from coin transaction if available
-      const coinTransaction = order.coinTransactions?.[0];
-      if (coinTransaction) {
-        transformedOrder.balanceBeforeOperationalFee = coinTransaction.balanceBefore.toString();
-        transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
-        transformedOrder.operationalFeeTransactionId = coinTransaction.id;
+      this.logger.log(`🔍 Filtering by plateNumber: ${plateNumber}`);
+    }
+  
+    // Filter berdasarkan nama driver
+    if (driverName) {
+      // Gunakan filter driver name yang lebih ketat
+      orConditions.push(
+        // 1. Cari di driver.name jika order sudah punya driver
+        {
+          driver: {
+            is: {
+              name: {
+                contains: driverName,
+                mode: 'insensitive'
+              }
+            }
+          }
+        },
+        // 2. Cari di specialRequests dengan pattern yang lebih spesifik untuk preferred driver
+        {
+          specialRequests: {
+            contains: `Preferred driver: ${driverName}`,
+            mode: 'insensitive'
+          }
+        },
+        // 3. Cari dengan pattern alternatif jika nama tidak persis sama
+        {
+          specialRequests: {
+            contains: driverName,
+            mode: 'insensitive'
+          }
+        }
+      );
+
+      this.logger.log(`🔍 Filtering by driverName: ${driverName} with strict matching`);
+    }
+  
+    // Jika ada kondisi OR, tambahkan ke where clause
+    if (orConditions.length > 0) {
+      where = {
+        ...where,
+        OR: orConditions
+      };
+    }
+  
+    // Log query yang dijalankan untuk debugging
+    this.logger.log('Final where clause:', JSON.stringify(where, null, 2));
+  
+    try {
+      const [orders, total] = await Promise.all([
+        this.prisma.order.findMany({
+          where,
+          include: {
+            fleet: true,
+            driver: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+                driverProfile: {
+                  select: {
+                    rating: true,
+                    driverStatus: true,
+                    currentLat: true,
+                    currentLng: true,
+                  }
+                }
+              }
+            },
+            customer: {
+              select: {
+                id: true,
+                name: true,
+                phone: true,
+              }
+            },
+            // Include coin transactions untuk balance information
+            coinTransactions: {
+              where: {
+                type: CoinTransactionType.OPERATIONAL_FEE,
+                status: CoinTransactionStatus.COMPLETED,
+              },
+              select: {
+                id: true,
+                balanceBefore: true,
+                balanceAfter: true,
+                amount: true,
+              },
+              take: 1,
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.order.count({ where }),
+      ]);
+  
+      this.logger.log(`Found ${total} orders matching filters, including ${orders.length} on current page`);
+  
+      if (driverName || plateNumber) {
+        // Log extra debug info for filtered results
+        this.logger.log('Filtered results preview:', orders.map(order => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          driverName: order.driver?.name || 'No driver',
+          specialRequests: order.specialRequests,
+          plateNumber: order.fleet?.plateNumber || 'No plate',
+        })));
       }
       
-      // Driver earnings sudah di-calculate di transformOrderResponse
-      
-      return transformedOrder;
-    });
+      // Transform orders dengan balance information dan driver earnings
+      const transformedOrders = orders.map(order => {
+        const transformedOrder = this.transformOrderResponse(order);
+        
+        // Add balance information from coin transaction if available
+        const coinTransaction = order.coinTransactions?.[0];
+        if (coinTransaction) {
+          transformedOrder.balanceBeforeOperationalFee = coinTransaction.balanceBefore.toString();
+          transformedOrder.balanceAfterOperationalFee = coinTransaction.balanceAfter.toString();
+          transformedOrder.operationalFeeTransactionId = coinTransaction.id;
+        }
+        
+        return transformedOrder;
+      });
   
-    return {
-      data: transformedOrders,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+      return {
+        data: transformedOrders,
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      this.logger.error('Error executing order query with filters:', {
+        error: error.message,
+        stack: error.stack,
+   
+        filters
+      });
+      throw error;
+    }
   }
 
   // Update method findOne untuk include balance information

@@ -723,7 +723,7 @@ async testDriverQuery() {
   // COMMON ENDPOINTS
 
   @Get()
-  @Roles('ADMIN', 'SUPER_ADMIN', 'DRIVER')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'DRIVER', 'OBSERVER')
   @ApiOperation({ summary: 'Get all orders with filters' })
   @ApiQuery({ name: 'status', required: false, enum: OrderStatus })
   @ApiQuery({ name: 'driverId', required: false, type: String })
@@ -732,6 +732,8 @@ async testDriverQuery() {
   @ApiQuery({ name: 'dateTo', required: false, type: String })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'plateNumber', required: false, type: String, description: 'Filter by vehicle plate number' })
+  @ApiQuery({ name: 'driverName', required: false, type: String, description: 'Filter by driver name' })
   async findAll(
     @Query('status') status?: OrderStatus,
     @Query('driverId') driverId?: string,
@@ -740,8 +742,15 @@ async testDriverQuery() {
     @Query('dateTo') dateTo?: string,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
+    @Query('plateNumber') plateNumber?: string,
+    @Query('driverName') driverName?: string,
     @Request() req?: AuthenticatedRequest
   ) {
+    // If user is an observer, delete driverId filter
+    if (req?.user.role === 'OBSERVER') {
+      driverId = undefined;
+    }
+
     // If user is a driver, filter to their orders only
     const filters = {
       status,
@@ -751,7 +760,29 @@ async testDriverQuery() {
       dateTo,
       page: Number(page),
       limit: Math.min(Number(limit), 100), // Limit max results
+      plateNumber, // Include plate number filter
+      driverName,  // Include driver name filter
     };
+
+    // Log ALL filter parameters for debugging
+    this.logger.log('🔍 Backend: Received filter parameters:', {
+      userId: req?.user?.id,
+      userRole: req?.user?.role,
+      plateNumber: plateNumber || 'undefined',
+      driverName: driverName || 'undefined',
+      statusFilter: status || 'undefined'
+    });
+
+    // Log filter for debugging OBSERVER issues
+    if (req?.user.role === 'OBSERVER' && (plateNumber || driverName)) {
+      this.logger.log('OBSERVER filtering applied:', {
+        userId: req.user.id,
+        userRole: req.user.role,
+        plateNumber,
+        driverName,
+        filters
+      });
+    }
 
     const result = await this.ordersService.findAll(filters);
     return {
@@ -761,7 +792,7 @@ async testDriverQuery() {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'SUPER_ADMIN', 'DRIVER', 'CUSTOMER')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'DRIVER', 'CUSTOMER', 'OBSERVER')
   @ApiOperation({ summary: 'Get order by ID' })
   @ApiParam({ name: 'id', description: 'Order ID' })
   async findOne(
@@ -783,6 +814,8 @@ async testDriverQuery() {
     if (req.user.role === 'CUSTOMER' && order.customerId !== req.user.id) {
       throw new ForbiddenException('You can only view your own orders');
     }
+
+    // Observer can see all orders without limit
 
     return {
       success: true,
@@ -925,7 +958,7 @@ async testDriverQuery() {
   // ANALYTICS AND MONITORING
 
   @Get('stats/dashboard')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OBSERVER')
   @ApiOperation({ summary: 'Get orders dashboard statistics' })
   @ApiQuery({ name: 'dateFrom', required: false, type: String })
   @ApiQuery({ name: 'dateTo', required: false, type: String })

@@ -397,12 +397,12 @@ export class CoinController {
   // =============================================
 
   @Get('transactions')
-  @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN')
+  @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN', 'OBSERVER')
   @ApiOperation({ 
     summary: 'Get coin transaction history',
     description: 'Retrieve transaction history. Users see their own, admins see all.'
   })
-  @ApiQuery({ name: 'userId', required: false, type: String, description: 'Admin only - filter by user ID' })
+  @ApiQuery({ name: 'userId', required: false, type: String, description: 'Admin/Observer only - filter by user ID' })
   @ApiQuery({ name: 'type', required: false, enum: CoinTransactionType })
   @ApiQuery({ name: 'status', required: false, enum: CoinTransactionStatus })
   @ApiQuery({ name: 'dateFrom', required: false, type: String })
@@ -420,7 +420,7 @@ export class CoinController {
     @Request() req?: AuthenticatedRequest
   ) {
     // Non-admin users can only see their own transactions
-    const effectiveUserId = ['ADMIN', 'SUPER_ADMIN'].includes(req?.user.role as string) 
+    const effectiveUserId = ['ADMIN', 'SUPER_ADMIN', 'OBSERVER'].includes(req?.user.role as string) 
       ? userId 
       : req?.user.id;
 
@@ -444,7 +444,7 @@ export class CoinController {
   }
 
   @Get('transactions/:id')
-  @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN')
+  @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN', 'OBSERVER')
   @ApiOperation({ 
     summary: 'Get transaction by ID',
     description: 'Get detailed information about a specific transaction'
@@ -472,7 +472,7 @@ export class CoinController {
   // =============================================
 
   @Get('dashboard/admin')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'OBSERVER')
   @ApiOperation({ 
     summary: 'Get coin system dashboard (Admin)',
     description: 'Administrative dashboard with coin system metrics'
