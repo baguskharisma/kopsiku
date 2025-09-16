@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     // Ambil cookie dari request browser
     const cookie = request.headers.get("cookie") || "";
 
-    const fullUrl = `${backendUrl}/api/v1/orders/operator/drivers?${request.nextUrl.searchParams}`;
+    const fullUrl = `${backendUrl}/orders/operator/drivers?${request.nextUrl.searchParams}`;
     console.log(`🔍 [API Route] Full URL: ${fullUrl}`);
 
     // Add timeout using AbortController
