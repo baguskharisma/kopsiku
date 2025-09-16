@@ -39,6 +39,8 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<UserResponse | null> {
+    if (!id) return null;
+
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -67,6 +69,8 @@ export class UsersService {
   }
 
   async findByPhone(phone: string): Promise<User | null> {
+    if (!phone) return null;
+
     return this.prisma.user.findUnique({
       where: { phone },
     });
@@ -135,6 +139,10 @@ export class UsersService {
   }
 
   async update(id: string, data: UpdateUserDto): Promise<UserResponse> {
+    if (!id) {
+      throw new NotFoundException('User ID is required');
+    }
+
     // Check if user exists
     const existingUser = await this.findById(id);
     if (!existingUser) {
@@ -178,6 +186,10 @@ export class UsersService {
   }
 
   async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
+    if (!id) {
+      throw new NotFoundException('User ID is required');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -209,6 +221,10 @@ export class UsersService {
   }
 
   async deactivate(id: string): Promise<void> {
+    if (!id) {
+      throw new NotFoundException('User ID is required');
+    }
+
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User tidak ditemukan');
@@ -236,6 +252,10 @@ export class UsersService {
   }
 
   async activate(id: string): Promise<void> {
+    if (!id) {
+      throw new NotFoundException('User ID is required');
+    }
+
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User tidak ditemukan');
@@ -251,6 +271,10 @@ export class UsersService {
   }
 
   async verifyUser(id: string): Promise<void> {
+    if (!id) {
+      throw new NotFoundException('User ID is required');
+    }
+
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User tidak ditemukan');
