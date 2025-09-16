@@ -14,14 +14,20 @@ export async function GET(request: NextRequest) {
     const fullUrl = `${backendUrl}/api/v1/orders/operator/drivers?${request.nextUrl.searchParams}`;
     console.log(`🔍 [API Route] Full URL: ${fullUrl}`);
 
+    // Add timeout using AbortController
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds
+
     const response = await fetch(fullUrl, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
         cookie, // ⬅️ forward cookie ke backend
       },
-      timeout: 30000, // 30 second timeout
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     console.log(`🔍 [API Route] Backend response status: ${response.status}`);
 
@@ -40,6 +46,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
     console.error("❌ [API Route] Fetch error:", error);
+
+    // Handle timeout error
+    if (error instanceof Error && error.name === 'AbortError') {
+      return NextResponse.json(
+        {
+          error: "Request timeout",
+          details: "Backend request timed out after 30 seconds",
+          timestamp: new Date().toISOString()
+        },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
       {
         error: "Failed to fetch drivers",
