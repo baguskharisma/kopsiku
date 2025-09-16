@@ -134,12 +134,7 @@ export class OrdersService {
       include: {
         driver: {
           include: {
-            driverProfile: {
-              where: {
-                // driverStatus: status,
-                // isVerified: true,
-              }
-            }
+            driverProfile: true
           }
         },
         fleet: {
@@ -159,9 +154,7 @@ export class OrdersService {
       },
       orderBy: {
         driver: {
-          driverProfile: {
-            rating: 'desc'
-          }
+          name: 'asc'
         }
       }
     });
@@ -198,10 +191,8 @@ export class OrdersService {
     // Transform to expected format
    // Transform to expected format
 return Array.from(driverMap.values()).map(({ driver, assignments }) => {
-  // Handle both array and single object for driverProfile
-  const driverProfile = driver.driverProfile?.length 
-    ? driver.driverProfile[0] 
-    : driver.driverProfile;
+  // driverProfile is a single object, not an array
+  const driverProfile = driver.driverProfile;
   
   return {
     id: driver.id,
