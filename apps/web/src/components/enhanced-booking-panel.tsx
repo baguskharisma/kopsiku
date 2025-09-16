@@ -1182,7 +1182,7 @@ Semoga perjalanan lancar!
           </div>
 
           {/* Fare Breakdown */}
-          {fareEstimate && (
+          {/* {fareEstimate && (
             <div className="bg-gray-50 rounded-xl p-4 mb-6" data-testid="fare-breakdown">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-gray-600">Distance</span>
@@ -1224,7 +1224,7 @@ Semoga perjalanan lancar!
                 </span>
               </div>
             </div>
-          )}
+          )} */}
 
           {/* Book Ride Button */}
           <Button 
