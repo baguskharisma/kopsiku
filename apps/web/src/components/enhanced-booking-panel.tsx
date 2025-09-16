@@ -1101,7 +1101,7 @@ Semoga perjalanan lancar!
                           {vehicle.features.slice(0, 2).join(" | ")}
                         </p>
                       </div>
-                      {fareEstimate && (
+                      {/* {fareEstimate && (
                         <div className="text-right">
                           <p className="font-semibold text-gray-900">
                             {formatCurrency(getVehiclePrice(fareEstimate.totalFare, vehicle.id))}
@@ -1110,7 +1110,7 @@ Semoga perjalanan lancar!
                             {vehicle.multiplier > 1 && `${vehicle.multiplier}x`}
                           </p>
                         </div>
-                      )}
+                      )} */}
                     </div>
                   </div>
                 </div>
