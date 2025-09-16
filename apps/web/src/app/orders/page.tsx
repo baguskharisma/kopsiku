@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
@@ -237,7 +237,7 @@ const extractPreferredDriver = (specialRequests?: string) => {
   }
 };
 
-export default function OrderHistoryPage() {
+function OrderHistoryContent() {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1142,5 +1142,13 @@ export default function OrderHistoryPage() {
       {/* Tambahkan Toaster dari sonner */}
       <Toaster position="top-right" />
     </div>
+  );
+}
+
+export default function OrderHistoryPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto py-6"><div className="text-center">Loading...</div></div>}>
+      <OrderHistoryContent />
+    </Suspense>
   );
 }
