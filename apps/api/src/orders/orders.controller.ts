@@ -207,18 +207,25 @@ async getActiveDrivers(
   @Request() req?: AuthenticatedRequest
 ) {
   try {
-    this.logger.log(`Fetching active drivers with filters:`, {
+    this.logger.log(`🚀 [OrdersController] getActiveDrivers called`);
+    this.logger.log(`🔍 [OrdersController] Auth check:`, {
+      hasUser: !!req?.user,
+      userId: req?.user?.id,
+      userRole: req?.user?.role,
+    });
+    this.logger.log(`🔍 [OrdersController] Filters:`, {
       vehicleType,
       status,
       requestedBy: req?.user?.id,
     });
 
+    this.logger.log(`🔄 [OrdersController] Calling ordersService.getActiveDrivers...`);
     const drivers = await this.ordersService.getActiveDrivers({
       vehicleType,
       status,
     });
 
-    this.logger.log(`Found ${drivers.length} active drivers`);
+    this.logger.log(`✅ [OrdersController] Found ${drivers.length} active drivers`);
 
     return {
       success: true,
@@ -231,10 +238,12 @@ async getActiveDrivers(
       }
     };
   } catch (error) {
-    this.logger.error('Failed to fetch drivers:', {
+    this.logger.error(`❌ [OrdersController] Failed to fetch drivers:`, {
       error: error.message,
       stack: error.stack,
       filters: { vehicleType, status },
+      userId: req?.user?.id,
+      errorName: error.constructor.name,
     });
     throw error;
   }

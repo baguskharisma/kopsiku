@@ -116,7 +116,10 @@ export class OrdersService {
   async getActiveDrivers(filters: GetDriversFilters = {}) {
     const { vehicleType, status = DriverStatus.ACTIVE } = filters;
 
+    this.logger.log(`🚀 [OrdersService] getActiveDrivers called with filters:`, filters);
+
   try {
+    this.logger.log(`🔄 [OrdersService] Starting FleetAssignment query...`);
     // Start with FleetAssignment to ensure we only get drivers with active assignments
     const assignments = await this.prisma.fleetAssignment.findMany({
       where: {
