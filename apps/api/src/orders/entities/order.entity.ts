@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Order, OrderStatus, VehicleType, PaymentMethod, PaymentStatus, TripType } from '@prisma/client';
+import {
+  Order,
+  OrderStatus,
+  VehicleType,
+  PaymentMethod,
+  PaymentStatus,
+  TripType,
+} from '@prisma/client';
 import { JsonValue } from '@prisma/client/runtime/library';
 
 export class OrderEntity implements Order {
@@ -14,7 +21,7 @@ export class OrderEntity implements Order {
   discountCoins: bigint | null;
   totalFareCoins: bigint | null;
   cancellationFeeCoins: bigint | null;
-  
+
   @ApiProperty({ example: 'order-uuid-here' })
   id: string;
 

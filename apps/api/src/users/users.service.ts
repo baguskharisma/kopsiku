@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { User, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/database/prisma.service';
@@ -185,7 +189,11 @@ export class UsersService {
     };
   }
 
-  async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
+  async changePassword(
+    id: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
     if (!id) {
       throw new NotFoundException('User ID is required');
     }
@@ -203,7 +211,10 @@ export class UsersService {
     }
 
     // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash,
+    );
     if (!isCurrentPasswordValid) {
       throw new ConflictException('Password saat ini tidak benar');
     }

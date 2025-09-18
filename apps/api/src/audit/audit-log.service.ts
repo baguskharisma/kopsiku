@@ -29,19 +29,26 @@ export class AuditLogService {
           resource: data.resource,
           resourceId: data.resourceId,
           userId: data.userId,
-          oldValues: data.oldValues ? JSON.stringify(data.oldValues) : undefined,
-          newValues: data.newValues ? JSON.stringify(data.newValues) : undefined,
+          oldValues: data.oldValues
+            ? JSON.stringify(data.oldValues)
+            : undefined,
+          newValues: data.newValues
+            ? JSON.stringify(data.newValues)
+            : undefined,
           ipAddress: data.ipAddress,
           userAgent: data.userAgent,
           createdAt: new Date(),
         },
       });
 
-      this.logger.debug(`Audit log created: ${data.action} on ${data.resource}`, {
-        userId: data.userId,
-        resourceId: data.resourceId,
-        action: data.action,
-      });
+      this.logger.debug(
+        `Audit log created: ${data.action} on ${data.resource}`,
+        {
+          userId: data.userId,
+          resourceId: data.resourceId,
+          action: data.action,
+        },
+      );
     } catch (error) {
       // Don't throw error for audit logging failures to prevent breaking main operations
       this.logger.error('Failed to create audit log:', {
@@ -60,7 +67,7 @@ export class AuditLogService {
     userId?: string,
     details?: Record<string, any>,
     ipAddress?: string,
-    userAgent?: string
+    userAgent?: string,
   ): Promise<void> {
     await this.log({
       action: `ORDER_${action.toUpperCase()}`,
@@ -79,7 +86,7 @@ export class AuditLogService {
   async getResourceLogs(
     resource: string,
     resourceId: string,
-    limit: number = 50
+    limit: number = 50,
   ): Promise<any[]> {
     try {
       return await this.prisma.auditLog.findMany({
@@ -115,10 +122,7 @@ export class AuditLogService {
   /**
    * Get audit logs for a specific user
    */
-  async getUserLogs(
-    userId: string,
-    limit: number = 100
-  ): Promise<any[]> {
+  async getUserLogs(userId: string, limit: number = 100): Promise<any[]> {
     try {
       return await this.prisma.auditLog.findMany({
         where: {
@@ -159,7 +163,9 @@ export class AuditLogService {
         },
       });
 
-      this.logger.log(`Cleaned ${result.count} old audit logs older than ${daysToKeep} days`);
+      this.logger.log(
+        `Cleaned ${result.count} old audit logs older than ${daysToKeep} days`,
+      );
       return result.count;
     } catch (error) {
       this.logger.error('Failed to clean old audit logs:', error);

@@ -1,9 +1,19 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
 
-
 @Injectable()
-export class PrismaService extends PrismaClient<Prisma.PrismaClientOptions, 'query' | 'info' | 'warn' | 'error'> implements OnModuleInit, OnModuleDestroy {
+export class PrismaService
+  extends PrismaClient<
+    Prisma.PrismaClientOptions,
+    'query' | 'info' | 'warn' | 'error'
+  >
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
@@ -86,7 +96,7 @@ export class PrismaService extends PrismaClient<Prisma.PrismaClientOptions, 'que
    * Utility method for handling database transactions
    */
   async executeTransaction<T>(
-    callback: (prisma: PrismaClient) => Promise<T>
+    callback: (prisma: PrismaClient) => Promise<T>,
   ): Promise<T> {
     return this.$transaction(callback);
   }
@@ -106,21 +116,25 @@ export class PrismaService extends PrismaClient<Prisma.PrismaClientOptions, 'que
   /**
    * Utility method to get database info for health checks
    */
-  async getDatabaseInfo(): Promise<Array<{
-    database_name: string;
-    version: string;
-    current_user: string;
-    server_address: string | null;
-    server_port: number | string | null;
-  }>> {
+  async getDatabaseInfo(): Promise<
+    Array<{
+      database_name: string;
+      version: string;
+      current_user: string;
+      server_address: string | null;
+      server_port: number | string | null;
+    }>
+  > {
     try {
-      const result = await this.$queryRaw<Array<{
-        database_name: string;
-        version: string;
-        current_user: string;
-        server_address: string | null;
-        server_port: number | string | null;
-      }>>`
+      const result = await this.$queryRaw<
+        Array<{
+          database_name: string;
+          version: string;
+          current_user: string;
+          server_address: string | null;
+          server_port: number | string | null;
+        }>
+      >`
         SELECT 
           current_database() as database_name,
           version() as version,
@@ -167,7 +181,7 @@ export class PrismaService extends PrismaClient<Prisma.PrismaClientOptions, 'que
       where: {
         OR: [
           { expiresAt: { lt: now } },
-          { 
+          {
             isRevoked: true,
             revokedAt: { lt: thirtyDaysAgo },
           },
@@ -178,7 +192,7 @@ export class PrismaService extends PrismaClient<Prisma.PrismaClientOptions, 'que
     this.logger.log(`Cleaned up ${result.count} expired/revoked tokens`);
     return result.count;
   }
-  
+
   async cleanupExpiredOtps(): Promise<number> {
     const result = await this.otp.deleteMany({
       where: {

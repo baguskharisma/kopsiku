@@ -5,6 +5,6 @@ import { TaxiPrinterController } from './printer.controller';
 @Module({
   controllers: [TaxiPrinterController],
   providers: [TaxiPrinterService],
-  exports: [TaxiPrinterService]
+  exports: [TaxiPrinterService],
 })
 export class PrinterModule {}

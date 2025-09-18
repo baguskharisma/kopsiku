@@ -30,14 +30,17 @@ import { ProcessCoinTopUpRequestDto } from './dto/process-coin-top-up-request.dt
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
-import { Role, CoinTransactionType, CoinTransactionStatus } from '@prisma/client';
+import {
+  Role,
+  CoinTransactionType,
+  CoinTransactionStatus,
+} from '@prisma/client';
 import { AuditLogService } from '../audit/audit-log.service';
 import { CoinWalletEntity } from './entities/coin-wallet.entity';
 import { CoinTransactionEntity } from './entities/coin-transaction.entity';
 import { CoinService } from './coins.service';
 import { CoinTopUpRequestEntity } from './entities/coin-top-up-request.enitty';
 import { ManualCoinAdjustmentDto } from './dto/manual-coin-adjustment.dto';
-
 
 interface AuthenticatedRequest {
   get(arg0: string): string | undefined;
@@ -69,9 +72,10 @@ export class CoinController {
 
   @Get('wallet')
   @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get user coin wallet details',
-    description: 'Retrieve current wallet balance and statistics for the authenticated user'
+    description:
+      'Retrieve current wallet balance and statistics for the authenticated user',
   })
   @ApiResponse({
     status: 200,
@@ -81,9 +85,9 @@ export class CoinController {
   async getWallet(@Request() req: AuthenticatedRequest) {
     try {
       const wallet = await this.coinService.getWalletDetails(req.user.id);
-      
+
       this.logger.log(`Wallet details retrieved for user ${req.user.id}`);
-      
+
       return {
         success: true,
         data: wallet,
@@ -100,14 +104,14 @@ export class CoinController {
 
   @Get('wallet/:userId')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get specific user wallet details (Admin only)',
-    description: 'Retrieve wallet details for any user by admin'
+    description: 'Retrieve wallet details for any user by admin',
   })
   @ApiParam({ name: 'userId', description: 'Target user ID' })
   async getWalletByUserId(
     @Param('userId') userId: string,
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(userId)) {
       throw new BadRequestException('Invalid user ID format');
@@ -115,7 +119,7 @@ export class CoinController {
 
     try {
       const wallet = await this.coinService.getWalletDetails(userId);
-      
+
       await this.auditLogService.log({
         action: 'VIEW_USER_WALLET',
         resource: 'coin_wallets',
@@ -124,7 +128,7 @@ export class CoinController {
         ipAddress: req.ip,
         userAgent: req.get('user-agent'),
       });
-      
+
       return {
         success: true,
         data: wallet,
@@ -142,14 +146,14 @@ export class CoinController {
 
   @Get('balance')
   @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get current coin balance',
-    description: 'Quick endpoint to get just the current balance'
+    description: 'Quick endpoint to get just the current balance',
   })
   async getBalance(@Request() req: AuthenticatedRequest) {
     try {
       const balance = await this.coinService.getWalletBalance(req.user.id);
-      
+
       return {
         success: true,
         data: {
@@ -174,9 +178,10 @@ export class CoinController {
   @Post('top-up/request')
   @Roles('CUSTOMER', 'DRIVER')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Create coin top up request',
-    description: 'Submit a request for coin top up that requires admin approval'
+    description:
+      'Submit a request for coin top up that requires admin approval',
   })
   @ApiResponse({
     status: 201,
@@ -184,12 +189,15 @@ export class CoinController {
     type: CoinTopUpRequestEntity,
   })
   async createTopUpRequest(
-    @Body(new ValidationPipe({ 
-      transform: true, 
-      whitelist: true, 
-      forbidNonWhitelisted: true 
-    })) createTopUpRequestDto: CreateCoinTopUpRequestDto,
-    @Request() req: AuthenticatedRequest
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    createTopUpRequestDto: CreateCoinTopUpRequestDto,
+    @Request() req: AuthenticatedRequest,
   ) {
     try {
       this.logger.log(`Top up request initiated by user: ${req.user.id}`, {
@@ -200,7 +208,7 @@ export class CoinController {
 
       const topUpRequest = await this.coinService.createTopUpRequest(
         req.user.id,
-        createTopUpRequestDto
+        createTopUpRequestDto,
       );
 
       await this.auditLogService.log({
@@ -220,23 +228,27 @@ export class CoinController {
       return {
         success: true,
         data: topUpRequest,
-        message: 'Top up request submitted successfully. Please wait for admin approval.',
+        message:
+          'Top up request submitted successfully. Please wait for admin approval.',
       };
     } catch (error) {
-      this.logger.error(`Top up request creation failed for user ${req.user.id}:`, {
-        error: error.message,
-        userId: req.user.id,
-        amount: createTopUpRequestDto.requestedAmount,
-      });
+      this.logger.error(
+        `Top up request creation failed for user ${req.user.id}:`,
+        {
+          error: error.message,
+          userId: req.user.id,
+          amount: createTopUpRequestDto.requestedAmount,
+        },
+      );
       throw error;
     }
   }
 
   @Get('top-up/my-requests')
   @Roles('CUSTOMER', 'DRIVER')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get my top up requests',
-    description: 'Retrieve all top up requests for the current user'
+    description: 'Retrieve all top up requests for the current user',
   })
   @ApiQuery({ name: 'status', required: false, enum: CoinTransactionStatus })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -245,7 +257,7 @@ export class CoinController {
     @Query('status') status?: CoinTransactionStatus,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
-    @Request() req?: AuthenticatedRequest
+    @Request() req?: AuthenticatedRequest,
   ) {
     const filters = {
       customerId: req?.user.id,
@@ -255,7 +267,7 @@ export class CoinController {
     };
 
     const result = await this.coinService.getTopUpRequests(filters);
-    
+
     return {
       success: true,
       ...result,
@@ -265,9 +277,9 @@ export class CoinController {
 
   @Get('top-up/requests')
   @Roles('ADMIN', 'SUPER_ADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get all top up requests (Admin)',
-    description: 'Retrieve all top up requests for admin review'
+    description: 'Retrieve all top up requests for admin review',
   })
   @ApiQuery({ name: 'status', required: false, enum: CoinTransactionStatus })
   @ApiQuery({ name: 'customerId', required: false, type: String })
@@ -279,7 +291,7 @@ export class CoinController {
     @Query('customerId') customerId?: string,
     @Query('urgencyLevel') urgencyLevel?: string,
     @Query('page') page = 1,
-    @Query('limit') limit = 20
+    @Query('limit') limit = 20,
   ) {
     const filters = {
       status,
@@ -290,7 +302,7 @@ export class CoinController {
     };
 
     const result = await this.coinService.getTopUpRequests(filters);
-    
+
     return {
       success: true,
       ...result,
@@ -301,15 +313,15 @@ export class CoinController {
   @Post('top-up/requests/:id/process')
   @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Process top up request (Super Admin only)',
-    description: 'Approve, reject, or cancel a top up request'
+    description: 'Approve, reject, or cancel a top up request',
   })
   @ApiParam({ name: 'id', description: 'Top up request ID' })
   async processTopUpRequest(
     @Param('id') id: string,
     @Body(ValidationPipe) processDto: ProcessCoinTopUpRequestDto,
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid request ID format');
@@ -319,7 +331,7 @@ export class CoinController {
       const result = await this.coinService.processTopUpRequest(
         id,
         processDto,
-        req.user.id
+        req.user.id,
       );
 
       this.logger.log(`Top up request processed: ${id}`, {
@@ -351,13 +363,14 @@ export class CoinController {
   @Post('manual-adjustment')
   @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Manual coin adjustment (Super Admin only)',
-    description: 'Manually adjust user coin balance for bonuses, refunds, or corrections'
+    description:
+      'Manually adjust user coin balance for bonuses, refunds, or corrections',
   })
   async manualCoinAdjustment(
     @Body(ValidationPipe) adjustmentDto: ManualCoinAdjustmentDto,
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(adjustmentDto.userId)) {
       throw new BadRequestException('Invalid user ID format');
@@ -366,7 +379,7 @@ export class CoinController {
     try {
       const result = await this.coinService.manualCoinAdjustment(
         adjustmentDto,
-        req.user.id
+        req.user.id,
       );
 
       this.logger.log(`Manual coin adjustment completed`, {
@@ -398,11 +411,17 @@ export class CoinController {
 
   @Get('transactions')
   @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN', 'OBSERVER')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get coin transaction history',
-    description: 'Retrieve transaction history. Users see their own, admins see all.'
+    description:
+      'Retrieve transaction history. Users see their own, admins see all.',
   })
-  @ApiQuery({ name: 'userId', required: false, type: String, description: 'Admin/Observer only - filter by user ID' })
+  @ApiQuery({
+    name: 'userId',
+    required: false,
+    type: String,
+    description: 'Admin/Observer only - filter by user ID',
+  })
   @ApiQuery({ name: 'type', required: false, enum: CoinTransactionType })
   @ApiQuery({ name: 'status', required: false, enum: CoinTransactionStatus })
   @ApiQuery({ name: 'dateFrom', required: false, type: String })
@@ -417,11 +436,13 @@ export class CoinController {
     @Query('dateTo') dateTo?: string,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
-    @Request() req?: AuthenticatedRequest
+    @Request() req?: AuthenticatedRequest,
   ) {
     // Non-admin users can only see their own transactions
-    const effectiveUserId = ['ADMIN', 'SUPER_ADMIN', 'OBSERVER'].includes(req?.user.role as string) 
-      ? userId 
+    const effectiveUserId = ['ADMIN', 'SUPER_ADMIN', 'OBSERVER'].includes(
+      req?.user.role as string,
+    )
+      ? userId
       : req?.user.id;
 
     const filters = {
@@ -435,7 +456,7 @@ export class CoinController {
     };
 
     const result = await this.coinService.getTransactionHistory(filters);
-    
+
     return {
       success: true,
       ...result,
@@ -445,14 +466,14 @@ export class CoinController {
 
   @Get('transactions/:id')
   @Roles('CUSTOMER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN', 'OBSERVER')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get transaction by ID',
-    description: 'Get detailed information about a specific transaction'
+    description: 'Get detailed information about a specific transaction',
   })
   @ApiParam({ name: 'id', description: 'Transaction ID' })
   async getTransactionById(
     @Param('id') id: string,
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid transaction ID format');
@@ -460,7 +481,7 @@ export class CoinController {
 
     // Implementation would go here - retrieve single transaction
     // with proper permission checks
-    
+
     return {
       success: true,
       message: 'Transaction retrieved successfully',
@@ -473,9 +494,9 @@ export class CoinController {
 
   @Get('dashboard/admin')
   @Roles('ADMIN', 'SUPER_ADMIN', 'OBSERVER')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get coin system dashboard (Admin)',
-    description: 'Administrative dashboard with coin system metrics'
+    description: 'Administrative dashboard with coin system metrics',
   })
   async getAdminDashboard() {
     try {
@@ -502,9 +523,9 @@ export class CoinController {
 
   @Get('stats/user')
   @Roles('CUSTOMER', 'DRIVER')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get user coin statistics',
-    description: 'Personal coin usage statistics'
+    description: 'Personal coin usage statistics',
   })
   async getUserStats(@Request() req: AuthenticatedRequest) {
     try {
@@ -523,7 +544,10 @@ export class CoinController {
         message: 'User statistics retrieved successfully',
       };
     } catch (error) {
-      this.logger.error(`Failed to retrieve user stats for ${req.user.id}:`, error);
+      this.logger.error(
+        `Failed to retrieve user stats for ${req.user.id}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -533,7 +557,8 @@ export class CoinController {
   // =============================================
 
   private isValidUUID(uuid: string): boolean {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     return uuidRegex.test(uuid);
   }
 }

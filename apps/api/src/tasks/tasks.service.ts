@@ -12,10 +12,12 @@ export class TasksService {
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async cleanupExpiredTokens() {
     this.logger.log('Starting cleanup of expired tokens...');
-    
+
     try {
       const deletedCount = await this.prisma.cleanupExpiredTokens();
-      this.logger.log(`Cleanup completed: ${deletedCount} expired tokens removed`);
+      this.logger.log(
+        `Cleanup completed: ${deletedCount} expired tokens removed`,
+      );
     } catch (error) {
       this.logger.error('Failed to cleanup expired tokens:', error);
     }
@@ -25,10 +27,12 @@ export class TasksService {
   @Cron(CronExpression.EVERY_HOUR)
   async cleanupExpiredOtps() {
     this.logger.log('Starting cleanup of expired OTPs...');
-    
+
     try {
       const deletedCount = await this.prisma.cleanupExpiredOtps();
-      this.logger.log(`Cleanup completed: ${deletedCount} expired OTPs removed`);
+      this.logger.log(
+        `Cleanup completed: ${deletedCount} expired OTPs removed`,
+      );
     } catch (error) {
       this.logger.error('Failed to cleanup expired OTPs:', error);
     }

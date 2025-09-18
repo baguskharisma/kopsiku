@@ -1,9 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { 
-  IsString, 
-  IsOptional, 
-  MinLength, 
-  MaxLength, 
+import {
+  IsString,
+  IsOptional,
+  MinLength,
+  MaxLength,
   IsDateString,
   IsEnum,
   IsNumber,
@@ -284,33 +284,33 @@ export class DriverProfileResponseDto {
   @ApiPropertyOptional({ example: 'Bank Central Asia' })
   bankName?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: 'https://storage.example.com/qr-codes/driver-123-qr.png',
-    description: 'QR code image URL for bank account details'
+    description: 'QR code image URL for bank account details',
   })
   qrImageUrl?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: '2024-01-15T10:30:00.000Z',
-    description: 'When QR image was uploaded'
+    description: 'When QR image was uploaded',
   })
   qrImageUploadedAt?: Date;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: true,
-    description: 'Whether QR image has been verified by admin'
+    description: 'Whether QR image has been verified by admin',
   })
   qrImageVerified: boolean;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: 'admin-uuid',
-    description: 'Admin ID who verified the QR image'
+    description: 'Admin ID who verified the QR image',
   })
   qrImageVerifiedBy?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     example: '2024-01-15T15:45:00.000Z',
-    description: 'When QR image was verified'
+    description: 'When QR image was verified',
   })
   qrImageVerifiedAt?: Date;
 
@@ -359,10 +359,10 @@ export class DriverProfileResponseDto {
   @ApiProperty({ example: 15 })
   maxRadius: number;
 
-  @ApiProperty({ 
-    enum: VehicleType, 
-    isArray: true, 
-    example: [VehicleType.MOTORCYCLE, VehicleType.ECONOMY] 
+  @ApiProperty({
+    enum: VehicleType,
+    isArray: true,
+    example: [VehicleType.MOTORCYCLE, VehicleType.ECONOMY],
   })
   preferredVehicleTypes: VehicleType[];
 

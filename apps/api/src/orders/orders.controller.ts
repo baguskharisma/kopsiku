@@ -70,15 +70,18 @@ export class OrdersController {
   // OPERATOR ENDPOINTS
 
   @Post('operator/create')
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'DRIVER')
   async createOrderAsOperator(
-    @Body(new ValidationPipe({ 
-      transform: true, 
-      whitelist: true, 
-      forbidNonWhitelisted: true,
-      validateCustomDecorators: true,
-    })) createOrderDto: CreateOrderDto,
-    @Request() req: AuthenticatedRequest
+    @Body(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        validateCustomDecorators: true,
+      }),
+    )
+    createOrderDto: CreateOrderDto,
+    @Request() req: AuthenticatedRequest,
   ) {
     try {
       // DEBUG: Cek authentication state
@@ -90,16 +93,18 @@ export class OrdersController {
         authHeader: req.get('Authorization'),
         fullUserObject: JSON.stringify(req.user),
       });
-  
+
       // CRITICAL FIX: Handle undefined req.user.id
       if (!req.user?.id) {
         this.logger.error('Authentication failed - no user ID found');
-        throw new UnauthorizedException('Authentication required. Please login again.');
+        throw new UnauthorizedException(
+          'Authentication required. Please login again.',
+        );
       }
-  
+
       // AUTO-ASSIGN adminId if not provided
       const effectiveAdminId = createOrderDto.adminId || req.user.id;
-      
+
       this.logger.log(`Order creation initiated by operator: ${req.user.id}`, {
         operatorId: req.user.id,
         operatorRole: req.user.role,
@@ -108,19 +113,54 @@ export class OrdersController {
         originalAdminId: createOrderDto.adminId,
         effectiveAdminId: effectiveAdminId,
       });
-  
-      // Update DTO with effective adminId
-      const orderData = {
+
+      // Update DTO with effective adminId and user role info
+      let orderData: any = {
         ...createOrderDto,
         adminId: effectiveAdminId,
+        createdByRole: req.user.role, // Pass user role to service
       };
-  
+
+      // AUTO-ASSIGN driver and fleet if user role is DRIVER
+      if (req.user.role === 'DRIVER') {
+        const driverAssignment = await this.ordersService.getDriverAssignment(
+          req.user.id,
+        );
+        if (driverAssignment) {
+          // Validate that the requested vehicle type matches driver's assigned vehicle
+          if (
+            driverAssignment.vehicleType !== createOrderDto.requestedVehicleType
+          ) {
+            throw new BadRequestException(
+              `Vehicle type mismatch. Driver is assigned to ${driverAssignment.vehicleType} but order requests ${createOrderDto.requestedVehicleType}`,
+            );
+          }
+
+          orderData = {
+            ...orderData,
+            autoAssignedDriverId: driverAssignment.driverId,
+            autoAssignedFleetId: driverAssignment.fleetId,
+          };
+
+          this.logger.log(`Auto-assigning driver to order`, {
+            driverId: driverAssignment.driverId,
+            fleetId: driverAssignment.fleetId,
+            plateNumber: driverAssignment.plateNumber,
+            vehicleType: driverAssignment.vehicleType,
+          });
+        } else {
+          throw new BadRequestException(
+            `Driver has no active fleet assignment or is not verified/active. Please contact administrator.`,
+          );
+        }
+      }
+
       // Additional security validations
       await this.validateOrderCreationRequest(orderData, req.user);
-  
+
       // Create the order with updated data
       const order = await this.ordersService.create(orderData, req.user.id);
-  
+
       // Rest of your existing code...
       await this.auditLogService.log({
         action: 'CREATE_ORDER',
@@ -139,7 +179,7 @@ export class OrdersController {
         ipAddress: req.ip,
         userAgent: req.get('user-agent'),
       });
-  
+
       this.logger.log(`Order created successfully: ${order.orderNumber}`, {
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -147,7 +187,19 @@ export class OrdersController {
         operationalFeeCharged: order.operationalFee?.charged || false,
         effectiveAdminId: effectiveAdminId,
       });
-  
+
+      // Determine success message based on auto-assignment and operational fee
+      let successMessage = 'Order created successfully.';
+
+      if (req.user.role === 'DRIVER') {
+        successMessage = `Order created and auto-assigned to driver ${req.user.name || req.user.id}. You are now marked as BUSY.`;
+      }
+
+      if (order.operationalFee?.charged) {
+        successMessage +=
+          ' Operational fee has been deducted from customer coin balance.';
+      }
+
       return {
         success: true,
         data: {
@@ -163,145 +215,161 @@ export class OrdersController {
           createdAt: order.createdAt,
           operationalFee: order.operationalFee || null,
           adminIdUsed: effectiveAdminId, // Debug info
+          // Add auto-assignment info
+          autoAssigned: req.user.role === 'DRIVER',
+          assignedDriver:
+            req.user.role === 'DRIVER'
+              ? {
+                  id: req.user.id,
+                  name: req.user.name || 'Driver',
+                }
+              : null,
         },
-        message: order.operationalFee?.charged 
-          ? 'Order created successfully. Operational fee has been deducted from customer coin balance.'
-          : 'Order created successfully.',
+        message: successMessage,
       };
     } catch (error) {
-      this.logger.error(`Order creation failed for operator ${req.user?.id || 'unknown'}:`, {
-        error: error.message,
-        stack: error.stack,
-        operatorId: req.user?.id,
-        passengerPhone: createOrderDto.passengerPhone,
-        adminId: createOrderDto.adminId,
-        hasUser: !!req.user,
-      });
-  
-      // Log failed attempt
-      await this.auditLogService.log({
-        action: 'CREATE_ORDER_FAILED',
-        resource: 'orders',
-        userId: req.user?.id,
-        newValues: {
+      this.logger.error(
+        `Order creation failed for operator ${req.user?.id || 'unknown'}:`,
+        {
           error: error.message,
-          passengerName: createOrderDto.passengerName,
+          stack: error.stack,
+          operatorId: req.user?.id,
+          passengerPhone: createOrderDto.passengerPhone,
           adminId: createOrderDto.adminId,
+          hasUser: !!req.user,
         },
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-      }).catch(() => {});
-  
+      );
+
+      // Log failed attempt
+      await this.auditLogService
+        .log({
+          action: 'CREATE_ORDER_FAILED',
+          resource: 'orders',
+          userId: req.user?.id,
+          newValues: {
+            error: error.message,
+            passengerName: createOrderDto.passengerName,
+            adminId: createOrderDto.adminId,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+        })
+        .catch(() => {});
+
       throw error;
     }
   }
-  
-@Get('operator/drivers')
-@Roles('ADMIN', 'SUPER_ADMIN')
-@ApiOperation({ summary: 'Get all active drivers with their fleet info' })
-@ApiQuery({ name: 'vehicleType', required: false, enum: VehicleType })
-@ApiQuery({ name: 'status', required: false, enum: DriverStatus })
-async getActiveDrivers(
-  @Query('vehicleType') vehicleType?: VehicleType,
-  @Query('status') status?: DriverStatus,
-  @Request() req?: AuthenticatedRequest
-) {
-  try {
-    this.logger.log(`🚀 [OrdersController] getActiveDrivers called`);
-    this.logger.log(`🔍 [OrdersController] Auth check:`, {
-      hasUser: !!req?.user,
-      userId: req?.user?.id,
-      userRole: req?.user?.role,
-    });
-    this.logger.log(`🔍 [OrdersController] Filters:`, {
-      vehicleType,
-      status,
-      requestedBy: req?.user?.id,
-    });
 
-    this.logger.log(`🔄 [OrdersController] Calling ordersService.getActiveDrivers...`);
-    const drivers = await this.ordersService.getActiveDrivers({
-      vehicleType,
-      status,
-    });
-
-    this.logger.log(`✅ [OrdersController] Found ${drivers.length} active drivers`);
-
-    return {
-      success: true,
-      data: drivers,
-      message: `Found ${drivers.length} drivers`,
-      meta: {
-        total: drivers.length,
+  @Get('operator/drivers')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Get all active drivers with their fleet info' })
+  @ApiQuery({ name: 'vehicleType', required: false, enum: VehicleType })
+  @ApiQuery({ name: 'status', required: false, enum: DriverStatus })
+  async getActiveDrivers(
+    @Query('vehicleType') vehicleType?: VehicleType,
+    @Query('status') status?: DriverStatus,
+    @Request() req?: AuthenticatedRequest,
+  ) {
+    try {
+      this.logger.log(`🚀 [OrdersController] getActiveDrivers called`);
+      this.logger.log(`🔍 [OrdersController] Auth check:`, {
+        hasUser: !!req?.user,
+        userId: req?.user?.id,
+        userRole: req?.user?.role,
+      });
+      this.logger.log(`🔍 [OrdersController] Filters:`, {
         vehicleType,
-        status: status || DriverStatus.ACTIVE,
-      }
-    };
-  } catch (error) {
-    this.logger.error(`❌ [OrdersController] Failed to fetch drivers:`, {
-      error: error.message,
-      stack: error.stack,
-      filters: { vehicleType, status },
-      userId: req?.user?.id,
-      errorName: error.constructor.name,
-    });
-    throw error;
+        status,
+        requestedBy: req?.user?.id,
+      });
+
+      this.logger.log(
+        `🔄 [OrdersController] Calling ordersService.getActiveDrivers...`,
+      );
+      const drivers = await this.ordersService.getActiveDrivers({
+        vehicleType,
+        status,
+      });
+
+      this.logger.log(
+        `✅ [OrdersController] Found ${drivers.length} active drivers`,
+      );
+
+      return {
+        success: true,
+        data: drivers,
+        message: `Found ${drivers.length} drivers`,
+        meta: {
+          total: drivers.length,
+          vehicleType,
+          status: status || DriverStatus.ACTIVE,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`❌ [OrdersController] Failed to fetch drivers:`, {
+        error: error.message,
+        stack: error.stack,
+        filters: { vehicleType, status },
+        userId: req?.user?.id,
+        errorName: error.constructor.name,
+      });
+      throw error;
+    }
   }
-}
 
-@Get('operator/drivers/test')
-@Roles('ADMIN', 'SUPER_ADMIN')
-@ApiOperation({ summary: 'Test driver query - simplified version' })
-async testDriverQuery() {
-  try {
-    // Simple query to test basic functionality
-    const users = await this.prisma.user.findMany({
-      where: {
-        role: 'DRIVER',
-        isActive: true,
-      },
-      include: {
-        DriverProfile: true,
-      },
-      take: 10,
-    });
+  @Get('operator/drivers/test')
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Test driver query - simplified version' })
+  async testDriverQuery() {
+    try {
+      // Simple query to test basic functionality
+      const users = await this.prisma.user.findMany({
+        where: {
+          role: 'DRIVER',
+          isActive: true,
+        },
+        include: {
+          DriverProfile: true,
+        },
+        take: 10,
+      });
 
-    const usersWithAssignments = await this.prisma.user.findMany({
-      where: {
-        role: 'DRIVER',
-        isActive: true,
-      },
-      include: {
-        DriverProfile: true,
-        FleetAssignment: {
-          where: { isActive: true },
-          include: {
-            fleet: true,
-          }
-        }
-      },
-      take: 10,
-    });
+      const usersWithAssignments = await this.prisma.user.findMany({
+        where: {
+          role: 'DRIVER',
+          isActive: true,
+        },
+        include: {
+          DriverProfile: true,
+          FleetAssignment: {
+            where: { isActive: true },
+            include: {
+              fleet: true,
+            },
+          },
+        },
+        take: 10,
+      });
 
-    return {
-      success: true,
-      data: {
-        basicUsers: users.length,
-        usersWithAssignments: usersWithAssignments.length,
-        sampleUser: users[0] || null,
-        sampleUserWithAssignment: usersWithAssignments[0] || null,
-      },
-      message: 'Test query completed',
-    };
-  } catch (error) {
-    this.logger.error('Test query failed:', error);
-    return {
-      success: false,
-      error: error.message,
-      message: 'Test query failed',
-    };
+      return {
+        success: true,
+        data: {
+          basicUsers: users.length,
+          usersWithAssignments: usersWithAssignments.length,
+          sampleUser: users[0] || null,
+          sampleUserWithAssignment: usersWithAssignments[0] || null,
+        },
+        message: 'Test query completed',
+      };
+    } catch (error) {
+      this.logger.error('Test query failed:', error);
+      return {
+        success: false,
+        error: error.message,
+        message: 'Test query failed',
+      };
+    }
   }
-}
 
   @Get('operator/available-drivers')
   @Roles('ADMIN', 'SUPER_ADMIN')
@@ -314,21 +382,26 @@ async testDriverQuery() {
     @Query('vehicleType') vehicleType: VehicleType,
     @Query('pickupLat') pickupLat: number,
     @Query('pickupLng') pickupLng: number,
-    @Query('radius') radius = 10
+    @Query('radius') radius = 10,
   ) {
     // Validate coordinates
     if (isNaN(pickupLat) || isNaN(pickupLng)) {
       throw new BadRequestException('Invalid coordinates provided');
     }
 
-    if (pickupLat < -90 || pickupLat > 90 || pickupLng < -180 || pickupLng > 180) {
+    if (
+      pickupLat < -90 ||
+      pickupLat > 90 ||
+      pickupLng < -180 ||
+      pickupLng > 180
+    ) {
       throw new BadRequestException('Coordinates out of valid range');
     }
 
     const drivers = await this.ordersService.findAvailableDrivers(
       vehicleType,
       { lat: Number(pickupLat), lng: Number(pickupLng) },
-      Number(radius)
+      Number(radius),
     );
 
     return {
@@ -346,7 +419,7 @@ async testDriverQuery() {
   async assignDriverAsOperator(
     @Param('id') id: string,
     @Body(ValidationPipe) assignDriverDto: AssignDriverDto,
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     // Validate UUID format
     if (!this.isValidUUID(id)) {
@@ -354,8 +427,12 @@ async testDriverQuery() {
     }
 
     try {
-      const order = await this.ordersService.assignDriver(id, assignDriverDto, req.user.id);
-      
+      const order = await this.ordersService.assignDriver(
+        id,
+        assignDriverDto,
+        req.user.id,
+      );
+
       // Log assignment
       await this.auditLogService.log({
         action: 'ASSIGN_DRIVER',
@@ -393,27 +470,26 @@ async testDriverQuery() {
   async getOperatorDashboard() {
     try {
       // Get orders by status
-      const [
-        pendingOrders,
-        assignedOrders, 
-        activeOrders,
-        completedToday
-      ] = await Promise.all([
-        this.ordersService.findAll({ status: OrderStatus.PENDING, limit: 100 }),
-        this.ordersService.findAll({ 
-          status: OrderStatus.DRIVER_ASSIGNED, 
-          limit: 100 
-        }),
-        this.ordersService.findAll({ 
-          status: OrderStatus.IN_PROGRESS, 
-          limit: 100 
-        }),
-        this.ordersService.findAll({ 
-          status: OrderStatus.COMPLETED, 
-          dateFrom: new Date().toISOString().split('T')[0],
-          limit: 1000 
-        })
-      ]);
+      const [pendingOrders, assignedOrders, activeOrders, completedToday] =
+        await Promise.all([
+          this.ordersService.findAll({
+            status: OrderStatus.PENDING,
+            limit: 100,
+          }),
+          this.ordersService.findAll({
+            status: OrderStatus.DRIVER_ASSIGNED,
+            limit: 100,
+          }),
+          this.ordersService.findAll({
+            status: OrderStatus.IN_PROGRESS,
+            limit: 100,
+          }),
+          this.ordersService.findAll({
+            status: OrderStatus.COMPLETED,
+            dateFrom: new Date().toISOString().split('T')[0],
+            limit: 1000,
+          }),
+        ]);
 
       return {
         success: true,
@@ -445,7 +521,7 @@ async testDriverQuery() {
   async getMyOrders(
     @Request() req: AuthenticatedRequest,
     @Query('status') status?: OrderStatus,
-    @Query('limit') limit = 10
+    @Query('limit') limit = 10,
   ) {
     const filters = {
       driverId: req.user.id,
@@ -479,8 +555,8 @@ async testDriverQuery() {
     });
 
     // Filter for active orders
-    const activeOrder = result.data.find(order =>
-      activeStatuses.includes(order.status)
+    const activeOrder = result.data.find((order) =>
+      activeStatuses.includes(order.status),
     );
 
     return {
@@ -497,18 +573,24 @@ async testDriverQuery() {
   @ApiParam({ name: 'id', description: 'Order ID' })
   async acceptOrder(
     @Param('id') id: string,
-    @Body() body: { estimatedArrival?: number; location?: { lat: number; lng: number } },
-    @Request() req: AuthenticatedRequest
+    @Body()
+    body: {
+      estimatedArrival?: number;
+      location?: { lat: number; lng: number };
+    },
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
     }
 
     const order = await this.ordersService.findOne(id);
-    
+
     // Verify this is the assigned driver
     if (order.driverId !== req.user.id) {
-      throw new ForbiddenException('You can only accept orders assigned to you');
+      throw new ForbiddenException(
+        'You can only accept orders assigned to you',
+      );
     }
 
     if (order.status !== OrderStatus.DRIVER_ASSIGNED) {
@@ -524,8 +606,12 @@ async testDriverQuery() {
       driverLocation: body.location,
     };
 
-    const updatedOrder = await this.ordersService.updateStatus(id, updateDto, req.user.id);
-    
+    const updatedOrder = await this.ordersService.updateStatus(
+      id,
+      updateDto,
+      req.user.id,
+    );
+
     // Log acceptance
     await this.auditLogService.log({
       action: 'ACCEPT_ORDER',
@@ -552,25 +638,31 @@ async testDriverQuery() {
   async rejectOrder(
     @Param('id') id: string,
     @Body() body: { reason: string },
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
     }
 
     if (!body.reason || body.reason.trim().length < 3) {
-      throw new BadRequestException('Rejection reason is required (minimum 3 characters)');
+      throw new BadRequestException(
+        'Rejection reason is required (minimum 3 characters)',
+      );
     }
 
     const order = await this.ordersService.findOne(id);
-    
+
     // Verify this is the assigned driver
     if (order.driverId !== req.user.id) {
-      throw new ForbiddenException('You can only reject orders assigned to you');
+      throw new ForbiddenException(
+        'You can only reject orders assigned to you',
+      );
     }
 
     if (order.status !== OrderStatus.DRIVER_ASSIGNED) {
-      throw new BadRequestException('Order cannot be rejected in current status');
+      throw new BadRequestException(
+        'Order cannot be rejected in current status',
+      );
     }
 
     const updateDto = new UpdateOrderStatusDto();
@@ -581,17 +673,21 @@ async testDriverQuery() {
       driverRejection: true,
     };
 
-    const updatedOrder = await this.ordersService.updateStatus(id, updateDto, req.user.id);
-    
+    const updatedOrder = await this.ordersService.updateStatus(
+      id,
+      updateDto,
+      req.user.id,
+    );
+
     // Log rejection
     await this.auditLogService.log({
       action: 'REJECT_ORDER',
       resource: 'orders',
       resourceId: id,
       userId: req.user.id,
-      newValues: { 
+      newValues: {
         status: OrderStatus.CANCELLED_BY_DRIVER,
-        reason: body.reason 
+        reason: body.reason,
       },
       ipAddress: req.ip,
       userAgent: req.get('user-agent'),
@@ -612,7 +708,7 @@ async testDriverQuery() {
   async markArrival(
     @Param('id') id: string,
     @Body() body: { location?: { lat: number; lng: number } },
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
@@ -635,7 +731,11 @@ async testDriverQuery() {
       location: body.location,
     };
 
-    const updatedOrder = await this.ordersService.updateStatus(id, updateDto, req.user.id);
+    const updatedOrder = await this.ordersService.updateStatus(
+      id,
+      updateDto,
+      req.user.id,
+    );
     return {
       success: true,
       data: updatedOrder,
@@ -651,7 +751,7 @@ async testDriverQuery() {
   async startTrip(
     @Param('id') id: string,
     @Body() body: { location?: { lat: number; lng: number } },
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
@@ -674,7 +774,11 @@ async testDriverQuery() {
       location: body.location,
     };
 
-    const updatedOrder = await this.ordersService.updateStatus(id, updateDto, req.user.id);
+    const updatedOrder = await this.ordersService.updateStatus(
+      id,
+      updateDto,
+      req.user.id,
+    );
     return {
       success: true,
       data: updatedOrder,
@@ -689,13 +793,14 @@ async testDriverQuery() {
   @ApiParam({ name: 'id', description: 'Order ID' })
   async completeTrip(
     @Param('id') id: string,
-    @Body() body: { 
+    @Body()
+    body: {
       location?: { lat: number; lng: number };
       finalFare?: number;
       notes?: string;
       odometerEnd?: number;
     },
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
@@ -721,11 +826,16 @@ async testDriverQuery() {
       odometerEnd: body.odometerEnd,
     };
 
-    const updatedOrder = await this.ordersService.updateStatus(id, updateDto, req.user.id);
+    const updatedOrder = await this.ordersService.updateStatus(
+      id,
+      updateDto,
+      req.user.id,
+    );
     return {
       success: true,
       data: updatedOrder,
-      message: 'Trip completed successfully. You are now available for new orders.',
+      message:
+        'Trip completed successfully. You are now available for new orders.',
     };
   }
 
@@ -741,8 +851,18 @@ async testDriverQuery() {
   @ApiQuery({ name: 'dateTo', required: false, type: String })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'plateNumber', required: false, type: String, description: 'Filter by vehicle plate number' })
-  @ApiQuery({ name: 'driverName', required: false, type: String, description: 'Filter by driver name' })
+  @ApiQuery({
+    name: 'plateNumber',
+    required: false,
+    type: String,
+    description: 'Filter by vehicle plate number',
+  })
+  @ApiQuery({
+    name: 'driverName',
+    required: false,
+    type: String,
+    description: 'Filter by driver name',
+  })
   async findAll(
     @Query('status') status?: OrderStatus,
     @Query('driverId') driverId?: string,
@@ -753,24 +873,27 @@ async testDriverQuery() {
     @Query('limit') limit = 10,
     @Query('plateNumber') plateNumber?: string,
     @Query('driverName') driverName?: string,
-    @Request() req?: AuthenticatedRequest
+    @Request() req?: AuthenticatedRequest,
   ) {
     // If user is an observer, delete driverId filter
     if (req?.user.role === 'OBSERVER') {
       driverId = undefined;
     }
 
-    // If user is a driver, filter to their orders only
+    // If user is a driver, filter to their orders only (both created by them and assigned to them)
     const filters = {
       status,
-      driverId: req?.user.role === 'DRIVER' ? req.user.id : driverId,
+      // For DRIVER role, use driverUserId instead of driverId to enable OR logic
+      driverId: req?.user.role === 'DRIVER' ? undefined : driverId,
       customerId,
       dateFrom,
       dateTo,
       page: Number(page),
       limit: Math.min(Number(limit), 100), // Limit max results
       plateNumber, // Include plate number filter
-      driverName,  // Include driver name filter
+      driverName, // Include driver name filter
+      // Add special driver filter to include orders created by the driver AND assigned to them
+      driverUserId: req?.user.role === 'DRIVER' ? req.user.id : undefined,
     };
 
     // Log ALL filter parameters for debugging
@@ -779,7 +902,7 @@ async testDriverQuery() {
       userRole: req?.user?.role,
       plateNumber: plateNumber || 'undefined',
       driverName: driverName || 'undefined',
-      statusFilter: status || 'undefined'
+      statusFilter: status || 'undefined',
     });
 
     // Log filter for debugging OBSERVER issues
@@ -789,7 +912,7 @@ async testDriverQuery() {
         userRole: req.user.role,
         plateNumber,
         driverName,
-        filters
+        filters,
       });
     }
 
@@ -804,10 +927,7 @@ async testDriverQuery() {
   @Roles('ADMIN', 'SUPER_ADMIN', 'DRIVER', 'CUSTOMER', 'OBSERVER')
   @ApiOperation({ summary: 'Get order by ID' })
   @ApiParam({ name: 'id', description: 'Order ID' })
-  async findOne(
-    @Param('id') id: string, 
-    @Request() req: AuthenticatedRequest
-  ) {
+  async findOne(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
     }
@@ -840,7 +960,7 @@ async testDriverQuery() {
   async updateStatus(
     @Param('id') id: string,
     @Body(ValidationPipe) updateOrderStatusDto: UpdateOrderStatusDto,
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
@@ -849,7 +969,7 @@ async testDriverQuery() {
     // Additional validation for drivers
     if (req.user.role === 'DRIVER') {
       const order = await this.ordersService.findOne(id);
-      
+
       // Ensure driver can only update their own orders
       if (order.driverId !== req.user.id) {
         throw new ForbiddenException('You can only update your own orders');
@@ -864,13 +984,17 @@ async testDriverQuery() {
         OrderStatus.CANCELLED_BY_DRIVER,
       ] as OrderStatus[];
 
-      if (!allowedStatuses.includes(updateOrderStatusDto.status as OrderStatus)) {
+      if (!allowedStatuses.includes(updateOrderStatusDto.status)) {
         throw new BadRequestException('Invalid status change for driver');
       }
     }
 
-    const order = await this.ordersService.updateStatus(id, updateOrderStatusDto, req.user.id);
-    
+    const order = await this.ordersService.updateStatus(
+      id,
+      updateOrderStatusDto,
+      req.user.id,
+    );
+
     // Log status change
     await this.auditLogService.log({
       action: 'UPDATE_ORDER_STATUS',
@@ -900,18 +1024,20 @@ async testDriverQuery() {
   async cancelOrder(
     @Param('id') id: string,
     @Body() body: { reason: string; cancellationFee?: number },
-    @Request() req: AuthenticatedRequest
+    @Request() req: AuthenticatedRequest,
   ) {
     if (!this.isValidUUID(id)) {
       throw new BadRequestException('Invalid order ID format');
     }
 
     if (!body.reason || body.reason.trim().length < 3) {
-      throw new BadRequestException('Cancellation reason is required (minimum 3 characters)');
+      throw new BadRequestException(
+        'Cancellation reason is required (minimum 3 characters)',
+      );
     }
 
     const order = await this.ordersService.findOne(id);
-    
+
     // Check permissions
     if (req.user.role === 'DRIVER' && order.driverId !== req.user.id) {
       throw new ForbiddenException('You can only cancel your own orders');
@@ -926,13 +1052,16 @@ async testDriverQuery() {
     ];
 
     if (!cancellableStatuses.includes(order.status)) {
-      throw new BadRequestException('Order cannot be cancelled in current status');
+      throw new BadRequestException(
+        'Order cannot be cancelled in current status',
+      );
     }
 
     const updateDto = new UpdateOrderStatusDto();
-    updateDto.status = req.user.role === 'DRIVER' 
-      ? OrderStatus.CANCELLED_BY_DRIVER 
-      : OrderStatus.CANCELLED_BY_SYSTEM;
+    updateDto.status =
+      req.user.role === 'DRIVER'
+        ? OrderStatus.CANCELLED_BY_DRIVER
+        : OrderStatus.CANCELLED_BY_SYSTEM;
     updateDto.reason = body.reason.trim();
     updateDto.metadata = {
       cancelledAt: new Date().toISOString(),
@@ -940,8 +1069,12 @@ async testDriverQuery() {
       cancellationFee: body.cancellationFee || 0,
     };
 
-    const updatedOrder = await this.ordersService.updateStatus(id, updateDto, req.user.id);
-    
+    const updatedOrder = await this.ordersService.updateStatus(
+      id,
+      updateDto,
+      req.user.id,
+    );
+
     // Log cancellation
     await this.auditLogService.log({
       action: 'CANCEL_ORDER',
@@ -983,33 +1116,47 @@ async testDriverQuery() {
     };
 
     const orders = await this.ordersService.findAll(filters);
-    
-    const completedOrders = orders.data.filter(o => o.status === OrderStatus.COMPLETED);
-    const cancelledOrders = orders.data.filter(o => 
-      o.status.toString().includes('CANCELLED')
+
+    const completedOrders = orders.data.filter(
+      (o) => o.status === OrderStatus.COMPLETED,
     );
-    
+    const cancelledOrders = orders.data.filter((o) =>
+      o.status.toString().includes('CANCELLED'),
+    );
+
     const stats = {
       totalOrders: orders.meta.total,
-      pendingOrders: orders.data.filter(o => o.status === OrderStatus.PENDING).length,
-      assignedOrders: orders.data.filter(o => o.status === OrderStatus.DRIVER_ASSIGNED).length,
-      activeOrders: orders.data.filter(o => [
-        OrderStatus.DRIVER_ACCEPTED,
-        OrderStatus.DRIVER_ARRIVING,
-        OrderStatus.IN_PROGRESS,
-      ].includes(o.status)).length,
+      pendingOrders: orders.data.filter((o) => o.status === OrderStatus.PENDING)
+        .length,
+      assignedOrders: orders.data.filter(
+        (o) => o.status === OrderStatus.DRIVER_ASSIGNED,
+      ).length,
+      activeOrders: orders.data.filter((o) =>
+        [
+          OrderStatus.DRIVER_ACCEPTED,
+          OrderStatus.DRIVER_ARRIVING,
+          OrderStatus.IN_PROGRESS,
+        ].includes(o.status),
+      ).length,
       completedOrders: completedOrders.length,
       cancelledOrders: cancelledOrders.length,
-      totalRevenue: completedOrders.reduce((sum, o) => sum + Number(o.totalFare), 0),
-      averageOrderValue: orders.data.length > 0 
-        ? orders.data.reduce((sum, o) => sum + Number(o.totalFare), 0) / orders.data.length
-        : 0,
-      completionRate: orders.data.length > 0 
-        ? (completedOrders.length / orders.data.length) * 100 
-        : 0,
-      cancellationRate: orders.data.length > 0 
-        ? (cancelledOrders.length / orders.data.length) * 100 
-        : 0,
+      totalRevenue: completedOrders.reduce(
+        (sum, o) => sum + Number(o.totalFare),
+        0,
+      ),
+      averageOrderValue:
+        orders.data.length > 0
+          ? orders.data.reduce((sum, o) => sum + Number(o.totalFare), 0) /
+            orders.data.length
+          : 0,
+      completionRate:
+        orders.data.length > 0
+          ? (completedOrders.length / orders.data.length) * 100
+          : 0,
+      cancellationRate:
+        orders.data.length > 0
+          ? (cancelledOrders.length / orders.data.length) * 100
+          : 0,
     };
 
     return {
@@ -1037,30 +1184,39 @@ async testDriverQuery() {
     };
 
     const orders = await this.ordersService.findAll(filters);
-    
-    const completedTrips = orders.data.filter(o => o.status === OrderStatus.COMPLETED);
-    const cancelledTrips = orders.data.filter(o => 
-      o.status === OrderStatus.CANCELLED_BY_DRIVER || 
-      o.status === OrderStatus.CANCELLED_BY_CUSTOMER
+
+    const completedTrips = orders.data.filter(
+      (o) => o.status === OrderStatus.COMPLETED,
     );
-    
+    const cancelledTrips = orders.data.filter(
+      (o) =>
+        o.status === OrderStatus.CANCELLED_BY_DRIVER ||
+        o.status === OrderStatus.CANCELLED_BY_CUSTOMER,
+    );
+
     const today = new Date().toDateString();
-    const todayTrips = orders.data.filter(o => 
-      new Date(o.createdAt).toDateString() === today
+    const todayTrips = orders.data.filter(
+      (o) => new Date(o.createdAt).toDateString() === today,
     );
 
     const stats = {
       totalTrips: orders.meta.total,
       completedTrips: completedTrips.length,
       cancelledTrips: cancelledTrips.length,
-      totalEarnings: completedTrips.reduce((sum, o) => sum + Number(o.totalFare), 0),
-      averageEarningPerTrip: completedTrips.length > 0
-        ? completedTrips.reduce((sum, o) => sum + Number(o.totalFare), 0) / completedTrips.length
-        : 0,
+      totalEarnings: completedTrips.reduce(
+        (sum, o) => sum + Number(o.totalFare),
+        0,
+      ),
+      averageEarningPerTrip:
+        completedTrips.length > 0
+          ? completedTrips.reduce((sum, o) => sum + Number(o.totalFare), 0) /
+            completedTrips.length
+          : 0,
       todayTrips: todayTrips.length,
-      completionRate: orders.data.length > 0 
-        ? (completedTrips.length / orders.data.length) * 100 
-        : 0,
+      completionRate:
+        orders.data.length > 0
+          ? (completedTrips.length / orders.data.length) * 100
+          : 0,
       rating: {
         average: 4.5, // This would come from a ratings service
         totalRatings: completedTrips.length,
@@ -1084,74 +1240,92 @@ async testDriverQuery() {
    * Validates order creation request for additional security
    */
   /**
- * Validates order creation request for additional security
- */
+   * Validates order creation request for additional security
+   */
   private async validateOrderCreationRequest(
-    createOrderDto: CreateOrderDto, 
-    user: { id: string; role: Role }
+    createOrderDto: CreateOrderDto,
+    user: { id: string; role: Role },
   ): Promise<void> {
     // Phone number format validation
     const phoneRegex = /^(\+62|62|0)[0-9]{8,13}$/;
-    if (!phoneRegex.test(createOrderDto.passengerPhone.replace(/[\s\-]/g, ''))) {
+    if (
+      !phoneRegex.test(createOrderDto.passengerPhone.replace(/[\s\-]/g, ''))
+    ) {
       throw new BadRequestException('Invalid phone number format');
     }
-  
+
     // Validate coordinates are within Riau bounds
     const { pickupCoordinates, dropoffCoordinates } = createOrderDto;
-    if (!this.isWithinSumateraBounds(pickupCoordinates) || 
-        !this.isWithinSumateraBounds(dropoffCoordinates)) {
+    if (
+      !this.isWithinSumateraBounds(pickupCoordinates) ||
+      !this.isWithinSumateraBounds(dropoffCoordinates)
+    ) {
       throw new BadRequestException('Coordinates must be within Riau Province');
     }
-  
+
     // Validate fare consistency - pastikan total fare tidak berbeda jauh dari komponen penyusunnya
-    const expectedTotal = createOrderDto.baseFare + createOrderDto.distanceFare + (createOrderDto.airportFare || 0);
-    if (Math.abs(expectedTotal - createOrderDto.totalFare) > 10000) { // Allow 100 rupiah difference for rounding
+    const expectedTotal =
+      createOrderDto.baseFare +
+      createOrderDto.distanceFare +
+      (createOrderDto.airportFare || 0);
+    if (Math.abs(expectedTotal - createOrderDto.totalFare) > 10000) {
+      // Allow 100 rupiah difference for rounding
       throw new BadRequestException('Fare calculation inconsistency detected');
     }
-  
+
     // Validate minimum fare (base fare should be at least 15,000 rupiah = 1,500,000 cents)
     // Menurunkan threshold minimum untuk memberikan fleksibilitas lebih
-    if (createOrderDto.totalFare < 1500000) { // 15,000 rupiah minimum
+    if (createOrderDto.totalFare < 1500000) {
+      // 15,000 rupiah minimum
       throw new BadRequestException('Total fare below minimum threshold');
     }
-  
+
     // Validasi jarak dan durasi yang masuk akal
     const distanceKm = createOrderDto.distanceMeters / 1000;
-    
+
     // Validate distance is reasonable (0.1km - 500km) - memperluas rentang
     if (distanceKm < 0.1 || distanceKm > 500) {
-      throw new BadRequestException(`Trip distance (${distanceKm.toFixed(1)}km) is outside reasonable range`);
+      throw new BadRequestException(
+        `Trip distance (${distanceKm.toFixed(1)}km) is outside reasonable range`,
+      );
     }
-  
+
     // Validate duration is reasonable (1 minute - 300 minutes)
-    if (createOrderDto.estimatedDurationMinutes < 1 || createOrderDto.estimatedDurationMinutes > 300) {
-      throw new BadRequestException(`Estimated duration (${createOrderDto.estimatedDurationMinutes} minutes) is outside reasonable range`);
+    if (
+      createOrderDto.estimatedDurationMinutes < 1 ||
+      createOrderDto.estimatedDurationMinutes > 300
+    ) {
+      throw new BadRequestException(
+        `Estimated duration (${createOrderDto.estimatedDurationMinutes} minutes) is outside reasonable range`,
+      );
     }
-    
+
     // Log informasi validasi untuk debugging jika diperlukan
     this.logger.log('Order validation passed', {
       distanceKm,
       totalFare: createOrderDto.totalFare,
       baseFare: createOrderDto.baseFare,
       distanceFare: createOrderDto.distanceFare,
-      vehicleType: createOrderDto.requestedVehicleType
+      vehicleType: createOrderDto.requestedVehicleType,
     });
   }
   /**
    * Check if coordinates are within Indonesia bounds
    */
-  private isWithinSumateraBounds(coordinates: { lat: number; lng: number }): boolean {
+  private isWithinSumateraBounds(coordinates: {
+    lat: number;
+    lng: number;
+  }): boolean {
     const { lat, lng } = coordinates;
     return lat >= -6.108 && lat <= 5.946 && lng >= 95.007 && lng <= 106.007;
   }
-  
-  
 
   /**
    * Validate UUID format
    */
   private isValidUUID(uuid: string): boolean {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     return uuidRegex.test(uuid);
   }
 }

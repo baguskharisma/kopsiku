@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsPositive, IsOptional, Min, Max } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsPositive,
+  IsOptional,
+  Min,
+  Max,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateCoinTopUpRequestDto {
@@ -7,7 +14,7 @@ export class CreateCoinTopUpRequestDto {
     description: 'Amount of coins to top up',
     example: 100000,
     minimum: 10000,
-    maximum: 10000000
+    maximum: 10000000,
   })
   @IsNotEmpty()
   @IsPositive()
@@ -18,7 +25,7 @@ export class CreateCoinTopUpRequestDto {
 
   @ApiProperty({
     description: 'Reason for top up request',
-    example: 'Need coins for operational fees'
+    example: 'Need coins for operational fees',
   })
   @IsNotEmpty()
   @IsString()
@@ -28,7 +35,7 @@ export class CreateCoinTopUpRequestDto {
     description: 'Urgency level',
     example: 'NORMAL',
     enum: ['NORMAL', 'HIGH', 'URGENT'],
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -36,7 +43,7 @@ export class CreateCoinTopUpRequestDto {
 
   @ApiProperty({
     description: 'Customer notes',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -46,7 +53,7 @@ export class CreateCoinTopUpRequestDto {
     description: 'Contact preference',
     example: 'PHONE',
     enum: ['PHONE', 'EMAIL', 'WHATSAPP'],
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -55,7 +62,7 @@ export class CreateCoinTopUpRequestDto {
   @ApiProperty({
     description: 'Payment method used',
     example: 'BANK_TRANSFER',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -63,7 +70,7 @@ export class CreateCoinTopUpRequestDto {
 
   @ApiProperty({
     description: 'Payment details as JSON',
-    required: false
+    required: false,
   })
   @IsOptional()
   paymentDetails?: any;

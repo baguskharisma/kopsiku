@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { 
-  IsString, 
-  IsEmail, 
-  IsOptional, 
-  MinLength, 
-  MaxLength, 
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  MinLength,
+  MaxLength,
   Matches,
   IsEnum,
   IsNotEmpty,
@@ -73,7 +73,8 @@ export class RegisterDto {
   @MinLength(6)
   @MaxLength(128)
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message: 'Password harus mengandung minimal 1 huruf kecil, 1 huruf besar, dan 1 angka',
+    message:
+      'Password harus mengandung minimal 1 huruf kecil, 1 huruf besar, dan 1 angka',
   })
   password: string;
 

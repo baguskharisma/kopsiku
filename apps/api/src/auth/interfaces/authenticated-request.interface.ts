@@ -2,14 +2,14 @@ import { Request } from 'express';
 import { Role } from '@prisma/client';
 
 export interface AuthenticatedUser {
-  id: string;           // User ID dari database (untuk konsistensi dengan service layer)
-  sub: string;          // Subject dari JWT (biasanya sama dengan id)
-  phone: string;        // Phone number
-  role: Role;           // User role
-  name?: string;        // User name (optional, jika diperlukan)
-  email?: string;       // User email (optional)
-  iat?: number;         // Issued at (timestamp)
-  exp?: number;         // Expires at (timestamp)
+  id: string; // User ID dari database (untuk konsistensi dengan service layer)
+  sub: string; // Subject dari JWT (biasanya sama dengan id)
+  phone: string; // Phone number
+  role: Role; // User role
+  name?: string; // User name (optional, jika diperlukan)
+  email?: string; // User email (optional)
+  iat?: number; // Issued at (timestamp)
+  exp?: number; // Expires at (timestamp)
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -37,7 +37,9 @@ export type RequestUserToAuthenticatedUser = RequestUser & {
 };
 
 // Helper function untuk convert dari RequestUser ke AuthenticatedUser
-export function mapToAuthenticatedUser(requestUser: RequestUser): AuthenticatedUser {
+export function mapToAuthenticatedUser(
+  requestUser: RequestUser,
+): AuthenticatedUser {
   return {
     id: requestUser.sub,
     sub: requestUser.sub,

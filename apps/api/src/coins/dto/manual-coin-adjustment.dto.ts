@@ -1,9 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsNumber, IsOptional, IsIn } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsIn,
+} from 'class-validator';
 
 export class ManualCoinAdjustmentDto {
   @ApiProperty({
-    description: 'User ID to adjust coins for'
+    description: 'User ID to adjust coins for',
   })
   @IsNotEmpty()
   @IsString()
@@ -11,7 +17,7 @@ export class ManualCoinAdjustmentDto {
 
   @ApiProperty({
     description: 'Amount to adjust (positive for credit, negative for debit)',
-    example: 50000
+    example: 50000,
   })
   @IsNotEmpty()
   @IsNumber()
@@ -19,7 +25,7 @@ export class ManualCoinAdjustmentDto {
 
   @ApiProperty({
     description: 'Type of adjustment',
-    enum: ['BONUS', 'ADJUSTMENT', 'REFUND']
+    enum: ['BONUS', 'ADJUSTMENT', 'REFUND'],
   })
   @IsNotEmpty()
   @IsString()
@@ -27,7 +33,7 @@ export class ManualCoinAdjustmentDto {
   type: 'BONUS' | 'ADJUSTMENT' | 'REFUND';
 
   @ApiProperty({
-    description: 'Description of the adjustment'
+    description: 'Description of the adjustment',
   })
   @IsNotEmpty()
   @IsString()
@@ -35,7 +41,7 @@ export class ManualCoinAdjustmentDto {
 
   @ApiProperty({
     description: 'Admin notes',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()

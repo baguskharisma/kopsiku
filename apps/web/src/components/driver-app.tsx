@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Car, 
-  MapPin, 
-  Phone, 
-  Navigation, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
-  User, 
+import Link from 'next/link';
+import {
+  Car,
+  MapPin,
+  Phone,
+  Navigation,
+  CheckCircle,
+  XCircle,
+  Clock,
+  User,
   DollarSign,
   AlertTriangle,
   Wifi,
@@ -20,7 +21,8 @@ import {
   History,
   TrendingUp,
   Star,
-  Route
+  Route,
+  Plus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -690,8 +692,9 @@ const DriverApp: React.FC = () => {
       {/* Main Content */}
       <div className="p-4">
         <Tabs defaultValue="active" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="active">Active Trip</TabsTrigger>
+            <TabsTrigger value="booking">Booking</TabsTrigger>
             <TabsTrigger value="stats">Statistics</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
@@ -835,6 +838,48 @@ const DriverApp: React.FC = () => {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="booking" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Plus className="w-5 h-5 mr-2" />
+                  Create New Order
+                </CardTitle>
+                <p className="text-sm text-gray-600">
+                  Create and assign orders to yourself as a driver
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="flex items-center">
+                      <Car className="h-5 w-5 text-green-600 mr-2" />
+                      <div>
+                        <p className="text-sm font-medium text-green-900">Auto-Completion Mode</p>
+                        <p className="text-xs text-green-600">
+                          Orders created will be automatically marked as COMPLETED
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Link href="/driver/booking">
+                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Open Booking Panel
+                    </Button>
+                  </Link>
+
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">
+                      Click above to access the full booking interface with map and location selection
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="stats" className="space-y-4 mt-4">

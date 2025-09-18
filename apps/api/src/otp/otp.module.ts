@@ -4,8 +4,8 @@ import { ConfigModule } from '@nestjs/config';
 import { OtpService } from './otp.service';
 
 @Module({
-	imports: [PrismaModule, ConfigModule],
-	providers: [OtpService],
-	exports: [OtpService],
+  imports: [PrismaModule, ConfigModule],
+  providers: [OtpService],
+  exports: [OtpService],
 })
 export class OtpModule {}

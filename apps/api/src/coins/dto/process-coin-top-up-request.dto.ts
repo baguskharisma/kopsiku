@@ -1,11 +1,18 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsPositive, IsOptional, IsIn, Min } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsPositive,
+  IsOptional,
+  IsIn,
+  Min,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class ProcessCoinTopUpRequestDto {
   @ApiProperty({
     description: 'Final approved amount',
-    example: 100000
+    example: 100000,
   })
   @IsNotEmpty()
   @IsPositive()
@@ -15,7 +22,7 @@ export class ProcessCoinTopUpRequestDto {
 
   @ApiProperty({
     description: 'Processing status',
-    enum: ['COMPLETED', 'FAILED', 'CANCELLED']
+    enum: ['COMPLETED', 'FAILED', 'CANCELLED'],
   })
   @IsNotEmpty()
   @IsString()
@@ -24,7 +31,7 @@ export class ProcessCoinTopUpRequestDto {
 
   @ApiProperty({
     description: 'Admin notes',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -32,7 +39,7 @@ export class ProcessCoinTopUpRequestDto {
 
   @ApiProperty({
     description: 'Rejection reason if status is FAILED or CANCELLED',
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsString()

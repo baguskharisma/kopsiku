@@ -10,20 +10,17 @@ import { CoinsModule } from 'src/coins/coins.module';
 
 @Module({
   imports: [
-    ThrottlerModule.forRoot([{
-      ttl: 60000, // 60 seconds
-      limit: 10, // 10 requests per minute per IP
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 seconds
+        limit: 10, // 10 requests per minute per IP
+      },
+    ]),
     AuthModule,
     CoinsModule,
   ],
   controllers: [OrdersController],
-  providers: [
-    OrdersService,
-    OrdersGateway,
-    PrismaService,
-    AuditLogService,
-  ],
+  providers: [OrdersService, OrdersGateway, PrismaService, AuditLogService],
   exports: [OrdersService, OrdersGateway],
 })
 export class OrdersModule {}

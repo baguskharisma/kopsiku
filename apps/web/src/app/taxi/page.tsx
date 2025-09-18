@@ -6,6 +6,7 @@ import { Toaster } from "sonner";
 import { queryClient } from "@/lib/queryClient";
 import { gpsService, type Coordinates } from "@/lib/gps-service";
 import type { Location } from "@/lib/types";
+import { useAuth } from "@/lib/use-auth";
 
 import EnhancedBookingPanel from "@/components/enhanced-booking-panel";
 import GPSLocationPicker from "@/components/gps-location-picker";
@@ -15,6 +16,7 @@ import LeafletMap from "@/components/leaflet-map";
 import BottomNavigation from "@/components/bottom-navigation";
 
 export default function TaxiAppMainPage() {
+  const { user, isLoading: authLoading } = useAuth();
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
   const [selectedDestination, setSelectedDestination] = useState<Location | null>(null);
   const [selectedPickup, setSelectedPickup] = useState<Location | null>(null);
@@ -24,6 +26,21 @@ export default function TaxiAppMainPage() {
   const [rideData, setRideData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(true);
+
+  // Determine operator role based on authenticated user
+  const getOperatorRole = (): 'ADMIN' | 'SUPER_ADMIN' | 'DRIVER' => {
+    if (!user) return 'ADMIN'; // Default for non-authenticated users
+
+    switch (user.role) {
+      case 'DRIVER':
+        return 'DRIVER';
+      case 'SUPER_ADMIN':
+        return 'SUPER_ADMIN';
+      case 'ADMIN':
+      default:
+        return 'ADMIN';
+    }
+  };
 
   // Get initial location on component mount
   useEffect(() => {
@@ -72,12 +89,14 @@ export default function TaxiAppMainPage() {
     setRouteData(route);
   };
 
-  if (isGettingLocation) {
+  if (authLoading || isGettingLocation) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600">Getting your location...</p>
+          <p className="text-gray-600">
+            {authLoading ? "Loading..." : "Getting your location..."}
+          </p>
         </div>
       </div>
     );
@@ -156,9 +175,9 @@ export default function TaxiAppMainPage() {
               onDestinationClick={() => setShowLocationPicker(true)}
               onPickupClick={() => setShowPickupPicker(true)}
               // onBookRide={handleBookRide}
-              onRouteCalculated={handleRouteCalculated} 
-              operatorId={""} 
-              operatorRole={"ADMIN"}              
+              onRouteCalculated={handleRouteCalculated}
+              operatorId={user?.id || ""}
+              operatorRole={getOperatorRole()}
             />
           </div>
         </div>

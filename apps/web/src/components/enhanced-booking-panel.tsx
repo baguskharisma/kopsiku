@@ -47,7 +47,7 @@ interface EnhancedBookingPanelProps {
   onRouteCalculated?: (route: RouteResult) => void;
   selectedPickup?: Location | null;
   operatorId: string;
-  operatorRole: 'ADMIN' | 'SUPER_ADMIN';
+  operatorRole: 'ADMIN' | 'SUPER_ADMIN' | 'DRIVER';
 }
 
 interface FareEstimate {
@@ -838,9 +838,9 @@ Semoga perjalanan lancar!
         airportFare: farePayload.airportCents > 0 ? Math.round(farePayload.airportCents) : undefined,
         totalFare: Math.round(farePayload.totalCents),    // Tidak dibagi 100
         paymentMethod: "CASH" as const,
-        specialRequests: selectedDriverId ? 
-          `Preferred driver: ${selectedDriver?.name} (${selectedDriver?.plate})`.substring(0, 1000) : 
-          undefined,
+        specialRequests: operatorRole !== 'DRIVER' && selectedDriverId ?
+          `Preferred driver: ${selectedDriver?.name} (${selectedDriver?.plate})`.substring(0, 1000) :
+          operatorRole === 'DRIVER' ? 'Driver auto-assignment' : undefined,
       };
 
       toast.loading("Membuat pesanan...", { id: "creating-order" });
@@ -862,10 +862,11 @@ Semoga perjalanan lancar!
       toast.success("Order berhasil dibuat!", { id: "creating-order" });
 
       let finalOrderData = orderResult.data;
-      
-      if (selectedDriverId && selectedDriver && selectedDriver.fleetId) {
+
+      // Only assign driver manually if user is not DRIVER role (DRIVER role auto-assigns on backend)
+      if (operatorRole !== 'DRIVER' && selectedDriverId && selectedDriver && selectedDriver.fleetId) {
         toast.loading("Menugaskan driver...", { id: "assigning-driver" });
-        
+
         try {
           const assignResponse = await fetch(`/api/orders/operator/${orderId}/assign`, {
             method: "POST",
@@ -883,17 +884,23 @@ Semoga perjalanan lancar!
             toast.success("Driver berhasil ditugaskan!", { id: "assigning-driver" });
           } else {
             const assignErrorData = await assignResponse.json();
-            toast.error("Gagal menugaskan driver", { 
+            toast.error("Gagal menugaskan driver", {
               id: "assigning-driver",
               description: assignErrorData.message || "Driver assignment failed"
             });
           }
         } catch (assignError) {
-          toast.error("Gagal menugaskan driver", { 
+          toast.error("Gagal menugaskan driver", {
             id: "assigning-driver",
             description: assignError instanceof Error ? assignError.message : "Unknown error"
           });
         }
+      } else if (operatorRole === 'DRIVER') {
+        // For DRIVER role, the order is auto-completed
+        toast.success("Order berhasil dibuat dan otomatis selesai! Status Anda tetap ACTIVE.", { id: "creating-order" });
+      } else if (operatorRole === 'ADMIN') {
+        // For ADMIN role, the order is also auto-completed
+        toast.success("Order berhasil dibuat dan otomatis selesai!", { id: "creating-order" });
       }
       
       setLastOrderData({ 
@@ -1150,35 +1157,52 @@ Semoga perjalanan lancar!
               />
             </div>
 
-            {/* Driver Selection */}
-            <div>
-              <label htmlFor="driver-select" className="text-sm font-medium text-gray-700 block mb-1">
-                Driver yang tersedia {loadingDrivers && "(Loading...)"}
-              </label>
-              <select
-                id="driver-select"
-                data-testid="select-driver"
-                value={selectedDriverId || ""}
-                onChange={(e) => setSelectedDriverId(e.target.value || null)}
-                className="w-full p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                disabled={loadingDrivers}
-              >
-                <option value="">Pilih Driver</option>
-                {availableDrivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} | {d.plate}
-                  </option>
-                ))}
-              </select>
-              {availableDrivers.length === 0 && !loadingDrivers && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Tidak ada driver tersedia untuk kendaraan {VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name}
-                </p>
-              )}
-              {loadingDrivers && (
-                <p className="text-xs text-blue-500 mt-1">Memuat data driver...</p>
-              )}
-            </div>
+            {/* Driver Selection - Hidden for DRIVER role */}
+            {operatorRole !== 'DRIVER' && (
+              <div>
+                <label htmlFor="driver-select" className="text-sm font-medium text-gray-700 block mb-1">
+                  Driver yang tersedia {loadingDrivers && "(Loading...)"}
+                </label>
+                <select
+                  id="driver-select"
+                  data-testid="select-driver"
+                  value={selectedDriverId || ""}
+                  onChange={(e) => setSelectedDriverId(e.target.value || null)}
+                  className="w-full p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  disabled={loadingDrivers}
+                >
+                  <option value="">Pilih Driver</option>
+                  {availableDrivers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} | {d.plate}
+                    </option>
+                  ))}
+                </select>
+                {availableDrivers.length === 0 && !loadingDrivers && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Tidak ada driver tersedia untuk kendaraan {VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name}
+                  </p>
+                )}
+                {loadingDrivers && (
+                  <p className="text-xs text-blue-500 mt-1">Memuat data driver...</p>
+                )}
+              </div>
+            )}
+
+            {/* Auto-completion info for DRIVER role */}
+            {/* {operatorRole === 'DRIVER' && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                <div className="flex items-center">
+                  <Car className="h-5 w-5 text-green-600 mr-2" />
+                  <div>
+                    <p className="text-sm font-medium text-green-900">Auto-Completion Mode</p>
+                    <p className="text-xs text-green-600">
+                      Order akan otomatis dibuat dengan status "SELESAI" untuk kendaraan {VEHICLE_TYPES.find(v => v.id === selectedVehicleType)?.name}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )} */}
           </div>
 
           {/* Fare Breakdown */}
@@ -1324,6 +1348,33 @@ Semoga perjalanan lancar!
                 <h4 className="font-semibold text-sm text-gray-900 mb-1">Driver yang Ditugaskan :</h4>
                 <p className="text-xs">
                   <strong>{lastOrderData.driver.name}</strong> - {lastOrderData.driver.plate}
+                </p>
+              </div>
+            )}
+
+            {/* Auto-completion info for DRIVER role */}
+            {operatorRole === 'DRIVER' && lastOrderData?.orderResult && (
+              <div className="bg-green-50 rounded-lg p-3">
+                <h4 className="font-semibold text-sm text-gray-900 mb-1">Status Order :</h4>
+                <p className="text-xs text-green-700">
+                  ✅ Order berhasil dibuat dan otomatis diselesaikan.
+                  Status driver Anda tetap: <strong>ACTIVE</strong>
+                </p>
+                <p className="text-xs text-green-600 mt-1">
+                  Anda dapat langsung membuat order baru.
+                </p>
+              </div>
+            )}
+
+            {/* Auto-completion info for ADMIN role */}
+            {operatorRole === 'ADMIN' && lastOrderData?.orderResult && (
+              <div className="bg-blue-50 rounded-lg p-3">
+                <h4 className="font-semibold text-sm text-gray-900 mb-1">Status Order :</h4>
+                <p className="text-xs text-blue-700">
+                  ✅ Order berhasil dibuat dan otomatis diselesaikan.
+                </p>
+                <p className="text-xs text-blue-600 mt-1">
+                  Order langsung berstatus COMPLETED tanpa perlu proses manual.
                 </p>
               </div>
             )}

@@ -6,6 +6,8 @@ export function AuthRequired() {
   return applyDecorators(
     UseGuards(JwtAuthGuard),
     ApiBearerAuth(),
-    ApiUnauthorizedResponse({ description: 'Unauthorized - Invalid or missing token' }),
+    ApiUnauthorizedResponse({
+      description: 'Unauthorized - Invalid or missing token',
+    }),
   );
 }

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/DESKTOP/bagus/projects/monorepo/kopsi-pekanbaru/apps/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

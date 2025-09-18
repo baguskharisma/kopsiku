@@ -7,12 +7,20 @@ export class UpdateOrderStatusDto {
   @IsEnum(OrderStatus, { message: 'Please provide a valid order status' })
   status: OrderStatus;
 
-  @ApiProperty({ example: 'Driver accepted the trip', description: 'Status change reason', required: false })
+  @ApiProperty({
+    example: 'Driver accepted the trip',
+    description: 'Status change reason',
+    required: false,
+  })
   @IsOptional()
   @IsString({ message: 'Reason must be a string' })
   reason?: string;
 
-  @ApiProperty({ example: 'Additional metadata', description: 'Additional context data', required: false })
+  @ApiProperty({
+    example: 'Additional metadata',
+    description: 'Additional context data',
+    required: false,
+  })
   @IsOptional()
   @IsObject({ message: 'Metadata must be an object' })
   metadata?: Record<string, any>;
