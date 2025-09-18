@@ -488,7 +488,7 @@ async function createOrderInteractive() {
       tripType: resp.tripType,
       scheduledAt: resp.scheduledAt ? new Date(resp.scheduledAt) : null,
       passengerName: extra.passengerName || "Default Passenger",
-      passengerPhone: extra.passengerPhone || "6281234567890",
+      passengerPhone: extra.passengerPhone || "081234567890",
       specialRequests: extra.specialRequests || null,
       pickupAddress: resp.pickupAddress,
       pickupLat: resp.pickupLat,
@@ -562,12 +562,12 @@ function formatPhoneNumber(phone: string): string {
   const cleanedPhone = phone.replace(/\D/g, '');
   
   // Pastikan nomor diawali dengan kode negara Indonesia
-  if (cleanedPhone.startsWith('62')) {
+  if (cleanedPhone.startsWith('0')) {
     return cleanedPhone;
   } else if (cleanedPhone.startsWith('0')) {
-    return `62${cleanedPhone.substring(1)}`;
+    return `0${cleanedPhone.substring(1)}`;
   } else {
-    return `62${cleanedPhone}`;
+    return `0${cleanedPhone}`;
   }
 }
 
